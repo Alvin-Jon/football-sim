@@ -1,0 +1,33 @@
+export type PlayerTrait =
+  // Passing
+  | "TRIES_LONG_BALLS"
+  | "LIKES_TO_SWITCH_BALL"
+  | "PLAYS_SIMPLE_PASSES"
+  | "TRIES_RISKY_PASSES"
+
+  // Shooting
+  | "SHOOTS_FROM_DISTANCE"
+  | "LIKES_TO_ROUND_KEEPER"
+  | "PLACES_SHOTS"
+  | "SHOOTS_WITH_POWER"
+
+  // Dribbling
+  | "RUNS_WITH_BALL"
+  | "TRICKSTER"
+  | "AVOIDS_USING_WEAK_FOOT"
+
+  // Movement
+  | "GETS_INTO_OPPOSITION_AREA"
+  | "LIKES_TO_MOVE_INTO_CHANNELS"
+  | "COMES_DEEP_TO_GET_BALL"
+  | "MAKES_LATE_RUNS"
+
+  // Crossing
+  | "EARLY_CROSSER"
+  | "LIKES_TO_CUT_INSIDE"
+
+  // Defensive
+  | "STOPPER"
+  | "STAYS_BACK_AT_ALL_TIMES"
+  | "DIVES_INTO_TACKLES"
+  | "MARKS_TIGHTLY";
