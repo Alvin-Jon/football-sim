@@ -147,6 +147,7 @@ export class MatchInitializationService {
       awayDirection,
 
       status: "NOT_STARTED",
+      minute: 0,
 
       clock: {
         minute: 0,
@@ -158,18 +159,11 @@ export class MatchInitializationService {
       tick: 0,
 
       ball: {
-        position: {
-          x: 52.5,
-          y: 34,
-        },
-
-        velocity: {
-          x: 0,
-          y: 0,
-        },
-
+        position: { x: 52.5, y: 34 },
+        velocity: { x: 0, y: 0 },
         height: 0,
-
+        verticalVelocity: 0,
+        spin: 0,
         possessionTeamId: null,
         possessionPlayerId: null,
       },

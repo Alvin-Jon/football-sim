@@ -44,6 +44,14 @@ export interface PlayerAttributes {
   aggression: number;
   teamwork: number;
   concentration: number;
+
+  // Goalkeeping attributes
+  reflexes: number;
+  handling: number;
+  oneOnOnes: number;
+  aerialAbility: number;
+  commandOfArea: number;
+  communication: number;
 }
 
 export interface Player {

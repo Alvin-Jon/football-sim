@@ -57,6 +57,23 @@ export class BallInteractionService {
     return true;
   }
 
+  deflectBall(
+  ball: BallState,
+  direction: number,
+  horizontalSpeed: number,
+  verticalSpeed = 0,
+): void {
+  ball.velocity = {
+    x: Math.cos(direction) * horizontalSpeed,
+    y: Math.sin(direction) * horizontalSpeed,
+  };
+
+  ball.verticalVelocity = verticalSpeed;
+  ball.height = Math.max(0, ball.height);
+  ball.possessionPlayerId = null;
+  ball.possessionTeamId = null;
+}
+
   assignPossession(
     playerId: string,
     teamId: string,

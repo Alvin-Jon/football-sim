@@ -52,3 +52,18 @@ export * from "./constants/receiving.constants.js";
 export * from "./services/interception.service.js";
 export * from "./types/interception.types.js";
 export * from "./constants/interception.constants.js";
+
+export * from "./services/goalkeeper-positioning.service.js";
+export * from "./services/goalkeeper-prediction.service.js";
+export * from "./services/goalkeeper-decision.service.js";
+export * from "./services/goalkeeper-save.service.js";
+export * from "./services/goalkeeper-distribution.service.js";
+export * from "./services/goalkeeper-action.service.js";
+export * from "./types/goalkeeper.types.js";
+export * from "./constants/goalkeeper.constants.js";
+export * from "./services/goalkeeper-save-execution.service.js";
+export * from "./services/goalkeeper-stats.service.js";
+export * from "./types/goalkeeper-stats.types.js";
+
+export * from "./services/ball-trajectory.service.js";
+export * from "./types/ball-trajectory.types.js";

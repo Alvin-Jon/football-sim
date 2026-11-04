@@ -1,55 +1,66 @@
-import type { Player } from "../types/player.types.js";
-import type { PlayerMatchState } from "../types/player-state.types.js";
 import type { BallState } from "../types/match.types.js";
+import type { DecisionPlayer } from "../types/decision.types.js";
 import type {
   InterceptionCandidate,
   InterceptionResult,
 } from "../types/interception.types.js";
 
-import { PitchService } from "./pitch.service.js";
-import { BallInteractionService } from "./ball-interaction.service.js";
-
-import { BALL_CONSTANTS } from "../constants/ball.constants.js";
 import { INTERCEPTION_CONSTANTS } from "../constants/interception.constants.js";
 
-export interface InterceptionPlayer {
-  player: Player;
-  state: PlayerMatchState;
-  teamId: string;
-}
+import { BallInteractionService } from "./ball-interaction.service.js";
+import { BallTrajectoryService } from "./ball-trajectory.service.js";
+import { PitchService } from "./pitch.service.js";
 
 export class InterceptionService {
   constructor(
     private readonly ballInteractionService: BallInteractionService,
+    private readonly trajectoryService: BallTrajectoryService,
   ) {}
 
   resolveInterception(
-    defenders: InterceptionPlayer[],
+    defenders: DecisionPlayer[],
+    teamId: string,
     ball: BallState,
   ): InterceptionResult {
-    if (ball.possessionPlayerId !== null) {
-      return this.noInterception("Ball is already controlled.");
+    if (
+      defenders.length === 0 ||
+      ball.possessionPlayerId !== null
+    ) {
+      return this.noInterception("No available interception.");
     }
 
-    if (defenders.length === 0) {
-      return this.noInterception("No eligible defenders.");
-    }
+    const trajectory = this.trajectoryService.predict(
+      ball,
+      INTERCEPTION_CONSTANTS.MAX_PREDICTION_TIME,
+      INTERCEPTION_CONSTANTS.PREDICTION_INTERVAL,
+    );
 
-    const candidates = defenders
-      .map((defender) => this.evaluateCandidate(defender, ball))
-      .filter(
-        (candidate): candidate is InterceptionCandidate =>
-          candidate !== null,
-      )
-      .sort(
-        (a, b) =>
-          a.interceptionTime - b.interceptionTime ||
-          b.score - a.score,
+    const candidates: InterceptionCandidate[] = [];
+
+    for (const defender of defenders) {
+      const candidate = this.findInterceptionPoint(
+        defender,
+        trajectory.samples,
       );
 
-    if (candidates.length === 0) {
-      return this.noInterception("No viable interception found.");
+      if (candidate) {
+        candidates.push(candidate);
+      }
     }
+
+    if (candidates.length === 0) {
+      return this.noInterception(
+        "No defender can reach the predicted ball trajectory.",
+      );
+    }
+
+    candidates.sort((a, b) => {
+      if (a.interceptionTime !== b.interceptionTime) {
+        return a.interceptionTime - b.interceptionTime;
+      }
+
+      return b.score - a.score;
+    });
 
     const bestCandidate = candidates[0];
 
@@ -62,218 +73,219 @@ export class InterceptionService {
     );
 
     if (!defender) {
-      return this.noInterception("Defender could not be found.");
+      return this.noInterception("Selected defender not found.");
     }
 
-    const currentDistance = PitchService.getDistance(
+    const currentBallDistance = PitchService.getDistance(
       defender.state.position,
       ball.position,
     );
 
-    // The defender hasn't reached the ball yet.
+    // The defender has reached the ball's current position.
     if (
-      currentDistance > INTERCEPTION_CONSTANTS.INTERCEPTION_RADIUS ||
-      ball.height > INTERCEPTION_CONSTANTS.MAX_INTERCEPTION_HEIGHT
+      currentBallDistance <= INTERCEPTION_CONSTANTS.INTERCEPTION_RADIUS &&
+      ball.height <= INTERCEPTION_CONSTANTS.MAX_INTERCEPTION_HEIGHT
     ) {
-      defender.state.targetPosition =
-        bestCandidate.interceptionPosition;
-
-      defender.state.isMoving = true;
-      defender.state.currentAction = "MOVING";
-
-      return {
-        intercepted: false,
-        playerId: defender.player.id,
-        interceptionPosition: bestCandidate.interceptionPosition,
-        message: "Defender moving to interception point.",
-      };
-    }
-
-    const controlled = this.ballInteractionService.tryControl(
-      defender.player,
-      defender.state,
-      defender.teamId,
-      ball,
-    );
-
-    if (!controlled) {
-      return this.noInterception(
-        "Defender reached the ball but could not control it.",
+      const intercepted = this.ballInteractionService.tryControl(
+        defender.player,
+        defender.state,
+        teamId,
+        ball,
       );
+
+      if (intercepted) {
+        return {
+          intercepted: true,
+          playerId: defender.player.id,
+          interceptionPosition: { ...ball.position },
+          message: "Ball successfully intercepted.",
+        };
+      }
     }
 
-    defender.state.targetPosition = null;
-    defender.state.isMoving = false;
-    defender.state.currentAction = "IDLE";
+    // Otherwise, move towards the predicted interception point.
+    defender.state.targetPosition = bestCandidate.interceptionPosition;
+    defender.state.isMoving = true;
+    defender.state.currentAction = "MOVING";
 
     return {
-      intercepted: true,
+      intercepted: false,
       playerId: defender.player.id,
-      interceptionPosition: ball.position,
-      message: "Ball successfully intercepted.",
+      interceptionPosition: bestCandidate.interceptionPosition,
+      message: "Defender moving towards predicted interception point.",
     };
   }
 
-  private evaluateCandidate(
-    defender: InterceptionPlayer,
-    ball: BallState,
+  private findInterceptionPoint(
+    defender: DecisionPlayer,
+    samples: Array<{
+      time: number;
+      position: { x: number; y: number };
+      height: number;
+    }>,
   ): InterceptionCandidate | null {
-    const attributes = defender.player.attributes;
+    const { player, state } = defender;
 
-    const anticipation =
-      attributes.anticipation *
-      INTERCEPTION_CONSTANTS.ANTICIPATION_WEIGHT;
+    const maxSpeed =
+      INTERCEPTION_CONSTANTS.MIN_PLAYER_SPEED +
+      ((player.attributes.pace - 1) / 19) *
+        (
+          INTERCEPTION_CONSTANTS.MAX_PLAYER_SPEED -
+          INTERCEPTION_CONSTANTS.MIN_PLAYER_SPEED
+        );
 
-    const positioning =
-      attributes.positioning *
-      INTERCEPTION_CONSTANTS.POSITIONING_WEIGHT;
+    const acceleration =
+      INTERCEPTION_CONSTANTS.MIN_PLAYER_ACCELERATION +
+      ((player.attributes.acceleration - 1) / 19) *
+        (
+          INTERCEPTION_CONSTANTS.MAX_PLAYER_ACCELERATION -
+          INTERCEPTION_CONSTANTS.MIN_PLAYER_ACCELERATION
+        );
 
-    const attributeBonus = anticipation + positioning;
+    const staminaMultiplier = Math.max(
+      0.75,
+      Math.min(1, state.stamina / 100),
+    );
 
-    const playerSpeed = this.getPlayerSpeed(defender.player);
+    const effectiveMaxSpeed = maxSpeed * staminaMultiplier;
 
-    let bestCandidate: InterceptionCandidate | null = null;
-
-    const interval =
-      INTERCEPTION_CONSTANTS.PREDICTION_INTERVAL;
-
-    const maxTime =
-      INTERCEPTION_CONSTANTS.MAX_PREDICTION_TIME;
-
-    for (
-      let time = interval;
-      time <= maxTime;
-      time += interval
-    ) {
-      const predictedBall = this.predictBallPosition(ball, time);
-
-      // Without aerial challenges, ignore balls that are too high.
+    for (const sample of samples) {
       if (
-        predictedBall.height >
+        sample.height >
         INTERCEPTION_CONSTANTS.MAX_INTERCEPTION_HEIGHT
       ) {
         continue;
       }
 
       const distance = PitchService.getDistance(
-        defender.state.position,
-        predictedBall.position,
+        state.position,
+        sample.position,
       );
 
-      const estimatedArrivalTime = distance / playerSpeed;
+      const availableTime = sample.time;
 
-      if (estimatedArrivalTime > time) {
-        continue;
-      }
-
-      const score =
-        100 -
-        estimatedArrivalTime * 15 +
-        attributeBonus;
+      const reachableDistance = this.getReachableDistance(
+        availableTime,
+        effectiveMaxSpeed,
+        acceleration,
+        state.currentSpeed,
+      );
 
       if (
-        score <
-        INTERCEPTION_CONSTANTS.MIN_INTERCEPTION_SCORE
+        distance >
+        reachableDistance +
+          INTERCEPTION_CONSTANTS.INTERCEPTION_RADIUS
       ) {
         continue;
       }
 
-      const candidate: InterceptionCandidate = {
-        playerId: defender.player.id,
-        interceptionPosition: predictedBall.position,
+      const estimatedArrivalTime = this.getArrivalTime(
+        distance,
+        effectiveMaxSpeed,
+        acceleration,
+        state.currentSpeed,
+      );
+
+      if (estimatedArrivalTime === null) {
+        continue;
+      }
+
+      const anticipationBonus =
+        player.attributes.anticipation *
+        INTERCEPTION_CONSTANTS.ANTICIPATION_WEIGHT;
+
+      const positioningBonus =
+        player.attributes.positioning *
+        INTERCEPTION_CONSTANTS.POSITIONING_WEIGHT;
+
+      return {
+        playerId: player.id,
+        interceptionPosition: { ...sample.position },
         distanceToBall: distance,
         estimatedArrivalTime,
-        interceptionTime: time,
-        score,
+        interceptionTime: sample.time,
+        score: anticipationBonus + positioningBonus,
       };
-
-      if (
-        bestCandidate === null ||
-        candidate.interceptionTime < bestCandidate.interceptionTime ||
-        (
-          candidate.interceptionTime === bestCandidate.interceptionTime &&
-          candidate.score > bestCandidate.score
-        )
-      ) {
-        bestCandidate = candidate;
-      }
     }
 
-    return bestCandidate;
+    return null;
   }
 
-  private predictBallPosition(
-    ball: BallState,
+  private getReachableDistance(
     time: number,
-  ): {
-    position: { x: number; y: number };
-    height: number;
-  } {
-    const friction = ball.height > 0
-      ? BALL_CONSTANTS.AIR_DRAG
-      : BALL_CONSTANTS.GROUND_FRICTION;
-
-    const speed = Math.hypot(
-      ball.velocity.x,
-      ball.velocity.y,
+    maxSpeed: number,
+    acceleration: number,
+    currentSpeed: number,
+  ): number {
+    const initialSpeed = Math.min(
+      Math.max(0, currentSpeed),
+      maxSpeed,
     );
 
-    const newSpeed = Math.max(
-      0,
-      speed - friction * time,
-    );
+    const accelerationTime =
+      (maxSpeed - initialSpeed) / acceleration;
 
-    const speedRatio = speed > 0
-      ? newSpeed / speed
-      : 0;
+    if (time <= accelerationTime) {
+      return (
+        initialSpeed * time +
+        0.5 * acceleration * time * time
+      );
+    }
 
-    const averageSpeed = (speed + newSpeed) / 2;
-
-    const distance = averageSpeed * time;
-
-    const directionX = speed > 0
-      ? ball.velocity.x / speed
-      : 0;
-
-    const directionY = speed > 0
-      ? ball.velocity.y / speed
-      : 0;
-
-    const height =
-      ball.height +
-      ball.verticalVelocity * time -
-      0.5 * BALL_CONSTANTS.GRAVITY * time * time;
-
-    return {
-      position: {
-        x: ball.position.x + directionX * distance,
-        y: ball.position.y + directionY * distance,
-      },
-      height: Math.max(0, height),
-    };
-  }
-
-  private getPlayerSpeed(player: Player): number {
-    const pace = player.attributes.pace;
-
-    const normalizedPace = (pace - 1) / 19;
+    const accelerationDistance =
+      initialSpeed * accelerationTime +
+      0.5 * acceleration * accelerationTime ** 2;
 
     return (
-      INTERCEPTION_CONSTANTS.MIN_PLAYER_SPEED +
-      normalizedPace *
-        (
-          INTERCEPTION_CONSTANTS.MAX_PLAYER_SPEED -
-          INTERCEPTION_CONSTANTS.MIN_PLAYER_SPEED
-        )
+      accelerationDistance +
+      maxSpeed * (time - accelerationTime)
     );
   }
 
-  private noInterception(message?: string): InterceptionResult {
+  private getArrivalTime(
+    distance: number,
+    maxSpeed: number,
+    acceleration: number,
+    currentSpeed: number,
+  ): number | null {
+    const initialSpeed = Math.min(
+      Math.max(0, currentSpeed),
+      maxSpeed,
+    );
+
+    if (distance <= 0) {
+      return 0;
+    }
+
+    const accelerationTime =
+      (maxSpeed - initialSpeed) / acceleration;
+
+    const accelerationDistance =
+      initialSpeed * accelerationTime +
+      0.5 * acceleration * accelerationTime ** 2;
+
+    if (distance <= accelerationDistance) {
+      return (
+        -initialSpeed +
+        Math.sqrt(
+          initialSpeed ** 2 +
+            2 * acceleration * distance,
+        )
+      ) / acceleration;
+    }
+
+    return (
+      accelerationTime +
+      (distance - accelerationDistance) / maxSpeed
+    );
+  }
+
+  private noInterception(message = "No interception."): InterceptionResult {
     return {
       intercepted: false,
       playerId: null,
       interceptionPosition: null,
-      ...(message ? { message } : {}),
+      message,
     };
   }
 }
