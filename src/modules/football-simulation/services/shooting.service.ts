@@ -229,7 +229,7 @@ export class ShootingService {
     const magnitude = this.random() * errorDistance;
 
     return {
-      x: target.x,
+      x: target.x + Math.cos(angle) * magnitude,
       y: target.y + Math.sin(angle) * magnitude,
     };
   }

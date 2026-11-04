@@ -147,7 +147,6 @@ export class MatchInitializationService {
       awayDirection,
 
       status: "NOT_STARTED",
-      minute: 0,
 
       clock: {
         minute: 0,

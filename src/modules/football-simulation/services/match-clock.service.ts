@@ -5,7 +5,7 @@ export class MatchClockService {
     clock: MatchClock,
     deltaTime: number,
   ): MatchClock {
-    const elapsedSeconds = clock.elapsedSeconds + deltaTime;
+    const elapsedSeconds = Number((clock.elapsedSeconds + deltaTime).toFixed(2));
 
     const totalSeconds = Math.floor(elapsedSeconds);
 

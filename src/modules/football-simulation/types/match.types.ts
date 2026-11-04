@@ -45,7 +45,5 @@ export interface MatchState {
 
   tick: number;
 
-  minute: number;
-
   ball: BallState;
 }
