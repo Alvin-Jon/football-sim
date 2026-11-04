@@ -10,6 +10,7 @@ import { PassingEvaluationService } from "./passing-evaluation.service.js";
 import { PitchService } from "./pitch.service.js";
 import { MovementEvaluationService } from "./movement-evaluation.service.js";
 import { PositioningService } from "./positioning.service.js";
+import { DefensiveEvaluationService } from "./defensive-evaluation.service.js";
 
 import type { FormationSlot } from "../types/formation.types.js";
 import type { FormationFluidity } from "../types/formation.types.js";
@@ -20,7 +21,7 @@ export class DecisionEngineService {
   private readonly pitchService = new PitchService();
   private readonly passingEvaluationService = new PassingEvaluationService();
   private readonly movementEvaluationService = new MovementEvaluationService();
-
+  private readonly defensiveEvaluationService = new DefensiveEvaluationService();
   private generateOnBallActions(
     context: DecisionContext,
   ): DecisionCandidate[] {
@@ -151,40 +152,42 @@ export class DecisionEngineService {
       context,
     );
 
+    const ballCarrier = context.opponents.find((opponent) => opponent.player.id === context.ball.possessionPlayerId);
+
+
+
+    const defensiveTarget = ballCarrier ?? nearestOpponent;
+
     if (context.phase === "DEFENDING") {
       // Press the opponent closest to the ball
-      if (nearestOpponentToBall) {
+      if (defensiveTarget) {
         candidates.push({
           action: "PRESS",
           score: 0,
-          targetPosition: nearestOpponentToBall.state.position,
-          targetPlayerId: nearestOpponentToBall.player.id,
+          targetPosition: defensiveTarget.state.position,
+          targetPlayerId: defensiveTarget.player.id,
           reasoning: ["Apply pressure to the opposition"],
         });
 
-        // Tackle options are only candidates when close enough
-        const distanceToBallCarrier =
-          PitchService.getDistance(
-            playerPosition,
-            nearestOpponentToBall.state.position,
-          );
+        const distance = PitchService.getDistance(
+          playerPosition,
+          defensiveTarget.state.position,
+        );
 
-        if (distanceToBallCarrier <= 3) {
+        if (ballCarrier && distance <= 3) {
           candidates.push({
             action: "TACKLE",
             score: 0,
-            targetPosition:
-              nearestOpponentToBall.state.position,
-            targetPlayerId: nearestOpponentToBall.player.id,
+            targetPosition: ballCarrier.state.position,
+            targetPlayerId: ballCarrier.player.id,
             reasoning: ["Attempt a normal tackle"],
           });
 
           candidates.push({
             action: "HARD_TACKLE",
             score: 0,
-            targetPosition:
-              nearestOpponentToBall.state.position,
-            targetPlayerId: nearestOpponentToBall.player.id,
+            targetPosition: ballCarrier.state.position,
+            targetPlayerId: ballCarrier.player.id,
             reasoning: ["Attempt an aggressive tackle"],
           });
         }
@@ -277,28 +280,41 @@ export class DecisionEngineService {
       : this.generateOffBallActions(context);
 
     const evaluatedCandidates = candidates.map(
-  (candidate) => {
-    const baseScore = DecisionEvaluationService.evaluate(
-      context,
-      candidate,
+      (candidate) => {
+        const baseScore =
+          DecisionEvaluationService.evaluate(
+            context,
+            candidate,
+          );
+
+        const passingScore =
+          this.passingEvaluationService.evaluate(
+            context,
+            candidate,
+          );
+
+        const movementScore =
+          this.movementEvaluationService.evaluate(
+            context,
+            candidate,
+          );
+
+        const defensiveScore =
+          this.defensiveEvaluationService.evaluate(
+            context,
+            candidate,
+          );
+
+        return {
+          ...candidate,
+          score:
+            baseScore +
+            passingScore +
+            movementScore +
+            defensiveScore,
+        };
+      },
     );
-
-    const passingScore = this.passingEvaluationService.evaluate(
-        context,
-        candidate,
-      );
-    
-    const movementScore = this.movementEvaluationService.evaluate(
-        context,
-        candidate,
-      );
-
-    return {
-      ...candidate,
-      score: baseScore + passingScore + movementScore,
-    };
-  },
-);
 
     evaluatedCandidates.sort(
       (a, b) => b.score - a.score,

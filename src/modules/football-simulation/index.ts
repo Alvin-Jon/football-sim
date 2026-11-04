@@ -29,6 +29,6 @@ export * from "./services/match.service.js";
 export * from "./services/passing-evaluation.service.js";
 
 
-//decision phase service and decision position service
 export * from "./services/decision-phase.service.js";
 export * from "./services/decision-position.service.js";
+export * from "./services/defensive-evaluation.service.js";
