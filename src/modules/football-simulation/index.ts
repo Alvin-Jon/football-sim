@@ -28,10 +28,17 @@ export * from "./services/positioning.service.js";
 export * from "./services/match.service.js";
 export * from "./services/passing-evaluation.service.js";
 
-
 export * from "./services/decision-phase.service.js";
 export * from "./services/decision-position.service.js";
 export * from "./services/defensive-evaluation.service.js";
 
 export * from "./types/decision-memory.types.js";
 export * from "./services/decision-persistence.service.js";
+
+export * from "./services/action-engine.service.js";
+export * from "./types/action.types.js";
+
+export * from "./services/ball-physics.service.js";
+export * from "./constants/ball.constants.js";
+export * from "./services/ball-interaction.service.js";
+export * from "./constants/ball-interaction.constants.js";

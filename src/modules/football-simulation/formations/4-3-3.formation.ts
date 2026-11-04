@@ -31,7 +31,7 @@ export const FORMATION_433: FormationDefinition = {
       attackingPosition: { x: 28, y: 43 },
       defensivePosition: { x: 17, y: 43 },
     },
-    {
+    { 
       id: "RB",
       position: "RB",
       attackingPosition: { x: 45, y: 60 },

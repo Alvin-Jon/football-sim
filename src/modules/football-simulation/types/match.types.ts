@@ -14,7 +14,8 @@ export interface BallState {
   position: Vector2D;
   velocity: Vector2D;
   height: number;
-
+  verticalVelocity: number;
+  spin: number;
   possessionTeamId: string | null;
   possessionPlayerId: string | null;
 }
