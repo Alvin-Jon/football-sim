@@ -11,6 +11,7 @@ import { PitchService } from "./pitch.service.js";
 import { MovementEvaluationService } from "./movement-evaluation.service.js";
 import { PositioningService } from "./positioning.service.js";
 import { DefensiveEvaluationService } from "./defensive-evaluation.service.js";
+import { DecisionPersistenceService } from "./decision-persistence.service.js";
 
 import type { FormationSlot } from "../types/formation.types.js";
 import type { FormationFluidity } from "../types/formation.types.js";
@@ -22,6 +23,7 @@ export class DecisionEngineService {
   private readonly passingEvaluationService = new PassingEvaluationService();
   private readonly movementEvaluationService = new MovementEvaluationService();
   private readonly defensiveEvaluationService = new DefensiveEvaluationService();
+  private readonly persistenceService = new DecisionPersistenceService();
   private generateOnBallActions(
     context: DecisionContext,
   ): DecisionCandidate[] {
@@ -270,7 +272,7 @@ export class DecisionEngineService {
     return nearestOpponent;
   }
 
-  decide(context: DecisionContext): DecisionResult {
+  private calculateDecision(context: DecisionContext): DecisionResult {
     const hasBall =
       context.ball.possessionPlayerId ===
       context.player.player.id;
@@ -345,6 +347,22 @@ export class DecisionEngineService {
       evaluatedAtTick: context.tick,
     };
   }
+
+  decide(context: DecisionContext): DecisionResult {
+      return this.persistenceService.getDecision(
+        context,
+        () => this.calculateDecision(context),
+      );
+    }
+
+    // Explicitly invalidate a player's current decision.
+    invalidateDecision(playerId: string): void {
+      this.persistenceService.invalidate(playerId);
+    }
+
+    clearDecisions(): void {
+      this.persistenceService.clear();
+    }
 
   evaluatePosition(
     position: { x: number; y: number },

@@ -32,3 +32,6 @@ export * from "./services/passing-evaluation.service.js";
 export * from "./services/decision-phase.service.js";
 export * from "./services/decision-position.service.js";
 export * from "./services/defensive-evaluation.service.js";
+
+export * from "./types/decision-memory.types.js";
+export * from "./services/decision-persistence.service.js";
