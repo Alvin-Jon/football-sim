@@ -24,6 +24,7 @@ export class DecisionEngineService {
   private readonly movementEvaluationService = new MovementEvaluationService();
   private readonly defensiveEvaluationService = new DefensiveEvaluationService();
   private readonly persistenceService = new DecisionPersistenceService();
+
   private generateOnBallActions(
     context: DecisionContext,
   ): DecisionCandidate[] {
@@ -149,14 +150,9 @@ export class DecisionEngineService {
       context,
     );
 
-    const nearestOpponentToBall = this.findNearestOpponent(
-      context.ball.position,
-      context,
+    const ballCarrier = context.opponents.find(
+      (opponent) => opponent.player.id === context.ball.possessionPlayerId,
     );
-
-    const ballCarrier = context.opponents.find((opponent) => opponent.player.id === context.ball.possessionPlayerId);
-
-
 
     const defensiveTarget = ballCarrier ?? nearestOpponent;
 
@@ -206,13 +202,11 @@ export class DecisionEngineService {
         });
       }
 
-      // Intercept
-      candidates.push({
-        action: "INTERCEPT",
-        score: 0,
-        targetPosition: context.ball.position,
-        reasoning: ["Attempt to intercept possession"],
-      });
+      // NOTE: INTERCEPT is intentionally NOT generated here. In the
+      // DEFENDING phase the opponent already has the ball, so there is
+      // nothing to intercept; the action would stop the player and do
+      // nothing. Interceptions only make sense for a loose ball
+      // (TRANSITION phase, below).
 
       // Defensive recovery
       candidates.push({
@@ -222,13 +216,11 @@ export class DecisionEngineService {
         reasoning: ["Defensive recovery"],
       });
     } else if (context.phase === "ATTACKING") {
-        candidates.push(
-          ...this.movementEvaluationService.generateCandidates(
-            context,
-          ),
-    );
-  } else {
-      // No clear possession: transition
+      candidates.push(
+        ...this.movementEvaluationService.generateCandidates(context),
+      );
+    } else {
+      // No clear possession: transition (loose ball)
       candidates.push({
         action: "MOVE",
         score: 0,
@@ -241,6 +233,14 @@ export class DecisionEngineService {
         score: 0,
         targetPosition: context.ball.position,
         reasoning: ["Provide support during transition"],
+      });
+
+      // Attempt to cut out / win the loose ball.
+      candidates.push({
+        action: "INTERCEPT",
+        score: 0,
+        targetPosition: context.ball.position,
+        reasoning: ["Attempt to win the loose ball"],
       });
     }
 
@@ -349,20 +349,20 @@ export class DecisionEngineService {
   }
 
   decide(context: DecisionContext): DecisionResult {
-      return this.persistenceService.getDecision(
-        context,
-        () => this.calculateDecision(context),
-      );
-    }
+    return this.persistenceService.getDecision(
+      context,
+      () => this.calculateDecision(context),
+    );
+  }
 
-    // Explicitly invalidate a player's current decision.
-    invalidateDecision(playerId: string): void {
-      this.persistenceService.invalidate(playerId);
-    }
+  // Explicitly invalidate a player's current decision.
+  invalidateDecision(playerId: string): void {
+    this.persistenceService.invalidate(playerId);
+  }
 
-    clearDecisions(): void {
-      this.persistenceService.clear();
-    }
+  clearDecisions(): void {
+    this.persistenceService.clear();
+  }
 
   evaluatePosition(
     position: { x: number; y: number },

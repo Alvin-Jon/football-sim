@@ -1,6 +1,11 @@
 import { PlayerService } from "./player.service.js";
 import { PitchService } from "./pitch.service.js";
 
+import {
+  createPlayerStatistics,
+  createTeamStatistics,
+} from "../types/statistics.types.js";
+
 import type { Team } from "../types/team.types.js";
 import type { TeamMatchState } from "../types/team-state.types.js";
 
@@ -127,6 +132,18 @@ export class MatchInitializationService {
     const homeDirection: PlayingDirection = "LEFT_TO_RIGHT";
     const awayDirection: PlayingDirection = "RIGHT_TO_LEFT";
 
+    const statistics = {
+        home: createTeamStatistics(),
+        away: createTeamStatistics(),
+
+        players: Object.fromEntries(
+          [...homeTeam.players, ...awayTeam.players].map((player) => [
+            player.id,
+            createPlayerStatistics(),
+          ]),
+        ),
+      };
+
     return {
       id,
 
@@ -166,6 +183,7 @@ export class MatchInitializationService {
         possessionTeamId: null,
         possessionPlayerId: null,
       },
+      statistics,
     };
   }
 }

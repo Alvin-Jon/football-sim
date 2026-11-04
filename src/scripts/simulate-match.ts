@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-
+import { MatchStatisticsService } from "../modules/football-simulation/services/match-statistics.service.js";
 import { FORMATION_433 } from "../modules/football-simulation/formations/4-3-3.formation.js";
 
 import { MatchInitializationService } from "../modules/football-simulation/services/match-initialization.service.js";
@@ -82,28 +82,110 @@ function runHalf(
 ) {
   const targetElapsedSeconds = half * HALF_DURATION;
 
-  while (match.clock.elapsedSeconds < targetElapsedSeconds) {
-    match = engine.tick(match);
+  let lastHolder: string | null = null;
+
+while (match.clock.elapsedSeconds < targetElapsedSeconds) {
+  match = engine.tick(match);
+
+  const holder = match.ball.possessionPlayerId;
+  if (holder !== lastHolder) {
+    console.log(
+      `t=${match.tick} ${match.clock.minute}' holder ${lastHolder} -> ${holder} ` +
+      `ball (${match.ball.position.x.toFixed(1)}, ${match.ball.position.y.toFixed(1)})`,
+    );
+    lastHolder = holder;
   }
+
+  if (match.tick % (TICK_RATE * 60) === 0) {
+    const states = [
+      ...Object.values(match.homeTeamState.playerStates),
+      ...Object.values(match.awayTeamState.playerStates),
+    ];
+    const avgStamina =
+      states.reduce((sum, s) => sum + s.stamina, 0) / states.length;
+    console.log(
+      `min ${match.clock.minute} | avgStamina ${avgStamina.toFixed(1)} ` +
+      `| moving ${states.filter((s) => s.isMoving).length} ` +
+      `| ball speed ${Math.hypot(match.ball.velocity.x, match.ball.velocity.y).toFixed(2)}`,
+    );
+  }
+}
 
   return match;
 }
 
-function logMatchState(match: ReturnType<typeof MatchInitializationService.initialize>) {
-  console.log("\n========== MATCH STATE ==========");
+function logMatchState(
+  match: ReturnType<typeof MatchInitializationService.initialize>,
+) {
+  const { home, away } = match.statistics;
 
-  console.log({
-    status: match.status,
-    half: match.clock.half,
-    minute: match.clock.minute,
-    second: match.clock.second,
-    elapsedSeconds: match.clock.elapsedSeconds,
-    tick: match.tick,
-    homeScore: match.homeTeamState.score,
-    awayScore: match.awayTeamState.score,
-  });
+  const possession =
+    MatchStatisticsService.getPossessionPercentage(match);
 
-  console.log("=================================\n");
+  const passingAccuracy =
+    MatchStatisticsService.getPassingAccuracy(match);
+
+  console.log("\n========== MATCH STATISTICS ==========\n");
+
+  console.table([
+    {
+      Statistic: "Goals",
+      Home: home.goals,
+      Away: away.goals,
+    },
+    {
+      Statistic: "Possession",
+      Home: `${possession.home}%`,
+      Away: `${possession.away}%`,
+    },
+    {
+      Statistic: "Passes Attempted",
+      Home: home.passesAttempted,
+      Away: away.passesAttempted,
+    },
+    {
+      Statistic: "Passes Completed",
+      Home: home.passesCompleted,
+      Away: away.passesCompleted,
+    },
+    {
+      Statistic: "Passing Accuracy",
+      Home: `${passingAccuracy.home}%`,
+      Away: `${passingAccuracy.away}%`,
+    },
+    {
+      Statistic: "Shots",
+      Home: home.shots,
+      Away: away.shots,
+    },
+    {
+      Statistic: "Shots on Target",
+      Home: home.shotsOnTarget,
+      Away: away.shotsOnTarget,
+    },
+    {
+      Statistic: "Tackles Attempted",
+      Home: home.tacklesAttempted,
+      Away: away.tacklesAttempted,
+    },
+    {
+      Statistic: "Tackles Won",
+      Home: home.tacklesWon,
+      Away: away.tacklesWon,
+    },
+    {
+      Statistic: "Interceptions",
+      Home: home.interceptions,
+      Away: away.interceptions,
+    },
+    {
+      Statistic: "Goalkeeper Saves",
+      Home: home.saves,
+      Away: away.saves,
+    },
+  ]);
+
+  console.log("\n======================================\n");
 }
 
 async function simulateMatch() {

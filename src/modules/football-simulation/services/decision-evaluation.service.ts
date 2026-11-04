@@ -186,7 +186,25 @@ export class DecisionEvaluationService {
         return distanceToGoal < 30 ? 20 : -10;
 
       case "PRESS":
-        return nearestOpponent < 8 ? 20 : -5;
+        return nearestOpponent < 2
+          ? 5
+          : nearestOpponent < 8
+            ? 20
+            : -5;
+
+      case "TACKLE":
+        return nearestOpponent < 1.5
+          ? 20
+          : nearestOpponent < 3
+            ? 12
+            : -20;
+
+      case "HARD_TACKLE":
+        return nearestOpponent < 1.5
+          ? 14
+          : nearestOpponent < 3
+            ? 8
+            : -25;
 
       case "MARK":
         return nearestOpponent < 15 ? 15 : 0;

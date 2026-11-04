@@ -1,6 +1,8 @@
 import { PlayerMovementService } from "./player-movement.service.js";
 import { PlayerStaminaService } from "./player-stamina.service.js";
 import { MatchClockService } from "./match-clock.service.js";
+import { MatchActionService } from "./match-action.service.js";
+import { MatchStatisticsService } from "./match-statistics.service.js";
 
 import type { MatchState } from "../types/match.types.js";
 
@@ -8,13 +10,15 @@ import type { Team } from "../types/team.types.js";
 
 export class MatchEngineService {
   private readonly tickRate: number;
+  private readonly matchActionService: MatchActionService;
 
-  constructor(tickRate = 20) {
+  constructor(tickRate = 20, random: () => number = Math.random) {
     if (!Number.isFinite(tickRate) || tickRate <= 0) {
       throw new Error("Tick rate must be greater than zero");
     }
 
     this.tickRate = tickRate;
+    this.matchActionService = new MatchActionService(random);
   }
 
   private getDeltaTime(): number {
@@ -126,12 +130,17 @@ finishMatch(match: MatchState): MatchState {
       deltaTime,
     );
 
-    return {
+    const updatedMatch: MatchState = {
       ...match,
 
       tick: match.tick + 1,
 
       clock,
+      ball: {
+        ...match.ball,
+        position: { ...match.ball.position },
+        velocity: { ...match.ball.velocity },
+      },
 
       homeTeamState: {
         ...match.homeTeamState,
@@ -143,5 +152,11 @@ finishMatch(match: MatchState): MatchState {
         playerStates: awayPlayerStates,
       },
     };
-  }
+
+    MatchStatisticsService.recordPossession(
+      updatedMatch,
+      deltaTime,
+    );
+
+    return this.matchActionService.update(updatedMatch, deltaTime);  }
 }

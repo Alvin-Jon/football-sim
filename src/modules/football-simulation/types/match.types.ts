@@ -1,6 +1,7 @@
 import type { Team } from "./team.types.js";
 import type { TeamMatchState } from "./team-state.types.js";
 import type { Vector2D } from "./pitch.types.js";
+import type { MatchStatistics } from "./statistics.types.js";
 
 export type MatchStatus =
   | "NOT_STARTED"
@@ -46,4 +47,6 @@ export interface MatchState {
   tick: number;
 
   ball: BallState;
+
+  statistics: MatchStatistics;
 }

@@ -1,8 +1,8 @@
 # Football Sim
 
 This repository contains a TypeScript football-match simulation prototype and a
-Fastify server scaffold. The simulation has several implemented systems, but
-they are not yet connected into a complete match loop. This document describes
+Fastify server scaffold. The match tick now coordinates player decisions,
+movement, ball interactions, and goalkeeper behavior. This document describes
 the current code rather than an intended or future feature set.
 
 ## What is here
@@ -22,10 +22,11 @@ first-half directions. Only the `4-3-3` formation is supplied by
 
 The match clock and `MatchEngineService` support explicit match-state
 transitions: start, finish the first half, start the second half, finish, and
-advance a tick. A tick updates player movement and stamina and advances the
-clock. Player movement uses pace, acceleration, stamina state, and target
-positions; pitch helpers provide dimensions, distance, direction transforms,
-and position clamping.
+advance a tick. A tick updates movement and stamina, advances the clock and
+ball, and delegates football decisions and action resolution to
+`MatchActionService`. Player movement uses pace, acceleration, stamina state,
+and target positions; pitch helpers provide dimensions, distance, direction
+transforms, and position clamping.
 
 ### Football behavior systems
 
@@ -38,6 +39,8 @@ The following systems are implemented as services and exported from
   invalidation.
 - **Action execution:** starts and tracks movement-oriented actions, including
   support, runs, pressing, marking, tracking back, and moving to intercept.
+  The match action coordinator also dispatches passes, crosses, shots, dribbling,
+  tackles, and holding the ball to their corresponding behaviors.
 - **Ball handling and flight:** assigns/releases possession, follows a
   controlling player, deflects the ball, simulates horizontal and vertical
   motion, and predicts a trajectory without mutating the match ball.
@@ -69,41 +72,31 @@ UI at `/docs`.
 These are gaps in the code as it stands, not assumptions about intended
 product requirements:
 
-1. **The main tick is not a football simulation loop.** `MatchEngineService.tick`
-   only updates player movement, stamina, the clock, and the tick counter. It
-   does not invoke decision-making or action execution, update ball physics or
-   possession, or process passes, shots, interceptions, goalkeeper actions,
-   goals, or score changes.
-2. **The behavior services are mostly standalone.** They can be used directly,
-   but the match engine does not coordinate them. In particular, decisions are
-   not turned into match events or ball actions by the tick loop.
-3. **Several actions have no executor.** `ActionEngineService` handles
-   movement-oriented actions. Other decisions—including pass, through ball,
-   long ball, shoot, cross, dribble, hold ball, tackle, and hard tackle—return
-   a failed execution with an “is not implemented yet” message. The separate
-   passing and shooting services do not currently fill this integration gap.
-4. **Goalkeeper behavior is not end-to-end.** Positioning and decision
-   selection exist, but the match loop does not call them. The goalkeeper
-   action service leaves catch, parry, punch, and distribution to other
-   handlers, and save evaluation/execution is not wired to shot resolution or
-   scorekeeping.
-5. **Match progression is caller-controlled.** The engine does not automatically
+1. **Match progression is caller-controlled.** The engine does not automatically
    stop at 45 or 90 minutes, transition to half-time, or finish a match. The
    caller must make those transitions. There is no stoppage time, extra time,
    penalty shootout, or event log in the match state.
-6. **The server has no application API yet.** The current repository contains
+2. **Some football rules are not modeled.** There are no fouls/cards,
+   offside, throw-ins, corners, free kicks, substitutions, or goalkeeper
+   statistics integration. A ball leaving the pitch outside the goal is stopped
+   at the boundary rather than restarting play with a set piece.
+3. **Action outcomes are simplified.** Tackle success is probabilistic but does
+   not produce fouls or cards. Crosses use the long-pass model, and a shot uses
+   a fixed power-shot type and goal-center target. Save attempts are resolved
+   by the goalkeeper services but are not recorded in match statistics.
+4. **The server has no application API yet.** The current repository contains
    no route files or application-plugin files. The Fastify scaffold and Swagger
    UI are present, but there are no implemented HTTP endpoints for managing
    teams, matches, or simulation state.
-7. **Persistence, authentication, and live transport are inactive.** The
+5. **Persistence, authentication, and live transport are inactive.** The
    database, authentication, and Socket.IO plugin source currently consists
    of commented-out code. The match state is in-memory and there is no
    persistence or live match broadcasting.
-8. **Some model/configuration fields are not consumed by the running loop.**
-   Team tactics, goalkeeper statistics, and positioning preferences are
-   represented in services/types, but are not incorporated into the match
-   tick. Some declared traits also have no action influence mapping.
-9. **Validation and test coverage are limited.** Initialization validates
+6. **Some model/configuration fields are not consumed by the running loop.**
+   Team tactics and formation positioning preferences are represented in
+   services/types, but do not yet influence match decisions. Some declared
+   traits also have no action-influence mapping.
+7. **Validation and test coverage are limited.** Initialization validates
    roster shape and pace, but does not validate all player attributes or team
    data. `package.json` has build and simulation scripts but no test or lint
    script, and no automated test suite is present in the repository.
@@ -116,13 +109,13 @@ Install dependencies with `npm install`, then use:
 npm run dev       # Start the Fastify server in watch mode
 npm run build     # Type-check and compile TypeScript into dist/
 npm start         # Start the compiled server
-npm run simulate  # Run the scripted two-half match-clock simulation
+npm run simulate  # Run the scripted two-half match simulation
 ```
 
 The simulation script in `src/scripts/simulate-match.ts` creates two generated
 4-3-3 teams, starts a match, advances it through two 45-minute halves, and
-checks the match lifecycle. It currently exercises clock and player updates;
-it does not simulate football actions or score goals.
+checks the match lifecycle. The match engine now also runs its football action
+loop during those ticks.
 
 ## Main code map
 
@@ -131,7 +124,6 @@ it does not simulate football actions or score goals.
 - `src/modules/football-simulation/types/` and `constants/` — simulation
   data contracts and tuning values.
 - `src/modules/football-simulation/formations/` — the supplied 4-3-3.
-- `src/scripts/simulate-match.ts` — standalone match lifecycle simulation.
+- `src/scripts/simulate-match.ts` — scripted two-half match simulation.
 - `src/server.ts`, `src/app.ts`, and `src/plugins/external/` — Fastify
   bootstrap and server plugins.
-
