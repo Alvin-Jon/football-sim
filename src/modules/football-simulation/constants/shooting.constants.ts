@@ -1,0 +1,31 @@
+export const SHOOTING_CONSTANTS = {
+  MIN_SHOT_POWER: 18,
+  MAX_SHOT_POWER: 32,
+
+  PLACED_POWER_MULTIPLIER: 0.75,
+  POWER_SHOT_MULTIPLIER: 1,
+  CHIP_POWER_MULTIPLIER: 0.8,
+
+  PLACED_VERTICAL_SPEED: 0.5,
+  POWER_VERTICAL_SPEED: 1,
+  CHIP_VERTICAL_SPEED: 8,
+
+  BASE_ACCURACY: 0.65,
+
+  SHOOTING_ACCURACY_WEIGHT: 0.012,
+  COMPOSURE_ACCURACY_WEIGHT: 0.005,
+
+  MAX_ERROR_DISTANCE: 5,
+
+  // Accuracy decreases as shooting distance increases.
+  DISTANCE_PENALTY: 0.008,
+
+  // Pressure from defenders reduces execution quality.
+  PRESSURE_PENALTY: 0.04,
+
+  MIN_ACCURACY: 0.15,
+  MAX_ACCURACY: 0.97,
+
+  // Allow small tolerance around the goal mouth.
+  GOAL_MOUTH_TOLERANCE: 0.2,
+} as const;

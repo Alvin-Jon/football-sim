@@ -42,3 +42,13 @@ export * from "./services/ball-physics.service.js";
 export * from "./constants/ball.constants.js";
 export * from "./services/ball-interaction.service.js";
 export * from "./constants/ball-interaction.constants.js";
+
+export * from "./services/passing.service.js";
+export * from "./types/passing.types.js";
+export * from "./constants/passing.constants.js";
+export * from "./services/receiving.service.js";
+export * from "./types/receiving.types.js";
+export * from "./constants/receiving.constants.js";
+export * from "./services/interception.service.js";
+export * from "./types/interception.types.js";
+export * from "./constants/interception.constants.js";
