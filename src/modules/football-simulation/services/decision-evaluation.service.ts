@@ -64,6 +64,20 @@ export class DecisionEvaluationService {
           attributes.aggression * 0.3
         );
 
+        case "TACKLE":
+          return (
+            attributes.tackling * 0.5 +
+            attributes.anticipation * 0.3 +
+            attributes.decisions * 0.2
+          );
+
+        case "HARD_TACKLE":
+          return (
+            attributes.tackling * 0.4 +
+            attributes.aggression * 0.4 +
+            attributes.strength * 0.2
+          );
+
       case "MAKE_RUN":
       case "SUPPORT":
       case "MOVE":

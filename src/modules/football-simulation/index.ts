@@ -26,3 +26,9 @@ export * from "./services/pitch.service.js";
 export * from "./services/formation.service.js";
 export * from "./services/positioning.service.js";
 export * from "./services/match.service.js";
+export * from "./services/passing-evaluation.service.js";
+
+
+//decision phase service and decision position service
+export * from "./services/decision-phase.service.js";
+export * from "./services/decision-position.service.js";

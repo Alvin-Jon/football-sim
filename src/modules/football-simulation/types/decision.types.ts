@@ -1,10 +1,8 @@
-import type { PlayerTrait } from "./player-traits.types.js";
-import type { Vector2D, MatchPhase } from "./pitch.types.js";
 import type { Player } from "./player.types.js";
 import type { PlayerMatchState } from "./player-state.types.js";
+import type { Vector2D, MatchPhase } from "./pitch.types.js";
 
 export type DecisionAction =
-  // On-ball
   | "PASS"
   | "THROUGH_BALL"
   | "LONG_BALL"
@@ -12,41 +10,31 @@ export type DecisionAction =
   | "CROSS"
   | "DRIBBLE"
   | "HOLD_BALL"
-
-  // Off-ball
   | "MOVE"
   | "SUPPORT"
   | "MAKE_RUN"
   | "PRESS"
   | "MARK"
   | "TRACK_BACK"
-  | "INTERCEPT";
+  | "INTERCEPT"
+  | "TACKLE"
+  | "HARD_TACKLE";
 
 export interface DecisionCandidate {
   action: DecisionAction;
-
   score: number;
-
   targetPosition?: Vector2D;
-
   targetPlayerId?: string;
-
   reasoning: string[];
 }
 
 export interface DecisionResult {
   playerId: string;
-
   action: DecisionAction;
-
   targetPosition?: Vector2D;
-
   targetPlayerId?: string;
-
   score: number;
-
   reasoning: string[];
-
   evaluatedAtTick: number;
 }
 
@@ -57,8 +45,9 @@ export interface DecisionPlayer {
 
 export interface DecisionContext {
   tick: number;
-
   phase: MatchPhase;
+
+  attackingDirection: "LEFT_TO_RIGHT" | "RIGHT_TO_LEFT";
 
   ball: {
     position: Vector2D;
@@ -67,9 +56,7 @@ export interface DecisionContext {
   };
 
   player: DecisionPlayer;
-
   teammates: DecisionPlayer[];
-
   opponents: DecisionPlayer[];
 
   goalPosition: Vector2D;

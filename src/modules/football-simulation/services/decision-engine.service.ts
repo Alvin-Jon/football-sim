@@ -4,21 +4,36 @@ import type {
   DecisionContext,
   DecisionResult,
 } from "../types/decision.types.js";
-
 import { DecisionEvaluationService } from "./decision-evaluation.service.js";
+import { DecisionPositionService } from "./decision-position.service.js";
+import { PassingEvaluationService } from "./passing-evaluation.service.js";
 import { PitchService } from "./pitch.service.js";
+import { MovementEvaluationService } from "./movement-evaluation.service.js";
 import { PositioningService } from "./positioning.service.js";
 
 import type { FormationSlot } from "../types/formation.types.js";
 import type { FormationFluidity } from "../types/formation.types.js";
 
 export class DecisionEngineService {
-  private static generateOnBallActions(
+  private readonly positionService = new DecisionPositionService();
+  private readonly evaluationService = new DecisionEvaluationService();
+  private readonly pitchService = new PitchService();
+  private readonly passingEvaluationService = new PassingEvaluationService();
+  private readonly movementEvaluationService = new MovementEvaluationService();
+
+  private generateOnBallActions(
     context: DecisionContext,
   ): DecisionCandidate[] {
     const candidates: DecisionCandidate[] = [];
 
     const playerPosition = context.player.state.position;
+
+    const goalPosition = context.goalPosition;
+
+    const distanceToGoal = PitchService.getDistance(
+      playerPosition,
+      goalPosition,
+    );
 
     // Shooting
     candidates.push({
@@ -28,57 +43,88 @@ export class DecisionEngineService {
     });
 
     // Dribbling
+    const dribbleTarget = PitchService.clampPosition(
+      this.positionService.getForwardPosition(
+        playerPosition,
+        10,
+        context.attackingDirection,
+      ),
+    );
+
     candidates.push({
       action: "DRIBBLE",
       score: 0,
-      targetPosition: {
-        x: playerPosition.x + 10,
-        y: playerPosition.y,
-      },
+      targetPosition: dribbleTarget,
       reasoning: ["Progress with the ball"],
     });
 
+    // Crossing
+    if (distanceToGoal < 35) {
+      candidates.push({
+        action: "CROSS",
+        score: 0,
+        targetPosition: goalPosition,
+        reasoning: ["Deliver the ball into the attacking area"],
+      });
+    }
+
     // Passing options
     for (const teammate of context.teammates) {
+      if (teammate.player.id === context.player.player.id) {
+        continue;
+      }
+
+      const teammatePosition = teammate.state.position;
+
       const distance = PitchService.getDistance(
         playerPosition,
-        teammate.state.position,
+        teammatePosition,
       );
 
+      const forwardDistance =
+        this.positionService.getForwardDistance(
+          playerPosition,
+          teammatePosition,
+          context.attackingDirection,
+        );
+
+      const isAhead = forwardDistance > 5;
+
+      // Long-distance passing
       if (distance > 35) {
         candidates.push({
           action: "LONG_BALL",
           score: 0,
           targetPlayerId: teammate.player.id,
-          targetPosition: teammate.state.position,
+          targetPosition: teammatePosition,
           reasoning: ["Long-distance passing option"],
         });
 
         continue;
       }
 
+      // Normal passing
       candidates.push({
         action: "PASS",
         score: 0,
         targetPlayerId: teammate.player.id,
-        targetPosition: teammate.state.position,
+        targetPosition: teammatePosition,
         reasoning: ["Available teammate"],
       });
 
-      if (
-        teammate.state.position.x >
-        playerPosition.x + 5
-      ) {
+      // Through ball
+      if (isAhead) {
         candidates.push({
           action: "THROUGH_BALL",
           score: 0,
           targetPlayerId: teammate.player.id,
-          targetPosition: teammate.state.position,
-          reasoning: ["Teammate is ahead"],
+          targetPosition: teammatePosition,
+          reasoning: ["Teammate is ahead of the ball"],
         });
       }
     }
 
+    // Retain possession
     candidates.push({
       action: "HOLD_BALL",
       score: 0,
@@ -88,44 +134,63 @@ export class DecisionEngineService {
     return candidates;
   }
 
-  private static generateOffBallActions(
+  private generateOffBallActions(
     context: DecisionContext,
   ): DecisionCandidate[] {
     const candidates: DecisionCandidate[] = [];
 
     const playerPosition = context.player.state.position;
 
-    const nearestOpponent = context.opponents
-      .map((opponent) => ({
-        ...opponent,
-        distance: PitchService.getDistance(
-          playerPosition,
-          opponent.state.position,
-        ),
-      }))
-      .sort((a, b) => a.distance - b.distance)[0];
+    const nearestOpponent = this.findNearestOpponent(
+      playerPosition,
+      context,
+    );
 
-    const nearestOpponentToBall = context.opponents
-      .map((opponent) => ({
-        ...opponent,
-        distance: PitchService.getDistance(
-          context.ball.position,
-          opponent.state.position,
-        ),
-      }))
-      .sort((a, b) => a.distance - b.distance)[0];
+    const nearestOpponentToBall = this.findNearestOpponent(
+      context.ball.position,
+      context,
+    );
 
     if (context.phase === "DEFENDING") {
+      // Press the opponent closest to the ball
       if (nearestOpponentToBall) {
         candidates.push({
           action: "PRESS",
           score: 0,
           targetPosition: nearestOpponentToBall.state.position,
           targetPlayerId: nearestOpponentToBall.player.id,
-          reasoning: ["Opposition player has the ball"],
+          reasoning: ["Apply pressure to the opposition"],
         });
+
+        // Tackle options are only candidates when close enough
+        const distanceToBallCarrier =
+          PitchService.getDistance(
+            playerPosition,
+            nearestOpponentToBall.state.position,
+          );
+
+        if (distanceToBallCarrier <= 3) {
+          candidates.push({
+            action: "TACKLE",
+            score: 0,
+            targetPosition:
+              nearestOpponentToBall.state.position,
+            targetPlayerId: nearestOpponentToBall.player.id,
+            reasoning: ["Attempt a normal tackle"],
+          });
+
+          candidates.push({
+            action: "HARD_TACKLE",
+            score: 0,
+            targetPosition:
+              nearestOpponentToBall.state.position,
+            targetPlayerId: nearestOpponentToBall.player.id,
+            reasoning: ["Attempt an aggressive tackle"],
+          });
+        }
       }
 
+      // Mark nearest opponent
       if (nearestOpponent) {
         candidates.push({
           action: "MARK",
@@ -136,6 +201,7 @@ export class DecisionEngineService {
         });
       }
 
+      // Intercept
       candidates.push({
         action: "INTERCEPT",
         score: 0,
@@ -143,37 +209,65 @@ export class DecisionEngineService {
         reasoning: ["Attempt to intercept possession"],
       });
 
+      // Defensive recovery
       candidates.push({
         action: "TRACK_BACK",
         score: 0,
         targetPosition: context.ball.position,
         reasoning: ["Defensive recovery"],
       });
-    } else {
+    } else if (context.phase === "ATTACKING") {
+        candidates.push(
+          ...this.movementEvaluationService.generateCandidates(
+            context,
+          ),
+    );
+  } else {
+      // No clear possession: transition
+      candidates.push({
+        action: "MOVE",
+        score: 0,
+        targetPosition: context.ball.position,
+        reasoning: ["Move towards the developing play"],
+      });
+
       candidates.push({
         action: "SUPPORT",
         score: 0,
         targetPosition: context.ball.position,
-        reasoning: ["Support the player in possession"],
-      });
-
-      candidates.push({
-        action: "MAKE_RUN",
-        score: 0,
-        targetPosition: {
-          x: playerPosition.x + 12,
-          y: playerPosition.y,
-        },
-        reasoning: ["Create an attacking option"],
+        reasoning: ["Provide support during transition"],
       });
     }
 
     return candidates;
   }
 
-  static decide(
+  private findNearestOpponent(
+    position: { x: number; y: number },
     context: DecisionContext,
-  ): DecisionResult {
+  ) {
+    let nearestOpponent:
+      | DecisionContext["opponents"][number]
+      | undefined;
+
+    let shortestDistance = Infinity;
+
+    for (const opponent of context.opponents) {
+      const distance = PitchService.getDistance(
+        position,
+        opponent.state.position,
+      );
+
+      if (distance < shortestDistance) {
+        shortestDistance = distance;
+        nearestOpponent = opponent;
+      }
+    }
+
+    return nearestOpponent;
+  }
+
+  decide(context: DecisionContext): DecisionResult {
     const hasBall =
       context.ball.possessionPlayerId ===
       context.player.player.id;
@@ -182,20 +276,37 @@ export class DecisionEngineService {
       ? this.generateOnBallActions(context)
       : this.generateOffBallActions(context);
 
-    const evaluatedCandidates = candidates.map((candidate) => ({
-      ...candidate,
-      score: DecisionEvaluationService.evaluate(
+    const evaluatedCandidates = candidates.map(
+  (candidate) => {
+    const baseScore = DecisionEvaluationService.evaluate(
+      context,
+      candidate,
+    );
+
+    const passingScore = this.passingEvaluationService.evaluate(
         context,
         candidate,
-      ),
-    }));
+      );
+    
+    const movementScore = this.movementEvaluationService.evaluate(
+        context,
+        candidate,
+      );
+
+    return {
+      ...candidate,
+      score: baseScore + passingScore + movementScore,
+    };
+  },
+);
 
     evaluatedCandidates.sort(
       (a, b) => b.score - a.score,
     );
 
     const selected = evaluatedCandidates[0];
-    if(!selected) {
+
+    if (!selected) {
       throw new Error(
         `No decision candidates available for player ${context.player.player.id} at tick ${context.tick}`,
       );
@@ -203,32 +314,33 @@ export class DecisionEngineService {
 
     return {
       playerId: context.player.player.id,
-
       action: selected.action,
 
-      targetPosition: selected.targetPosition,
+      ...(selected.targetPosition !== undefined && {
+        targetPosition: selected.targetPosition,
+      }),
 
-      targetPlayerId: selected.targetPlayerId,
+      ...(selected.targetPlayerId !== undefined && {
+        targetPlayerId: selected.targetPlayerId,
+      }),
 
       score: selected.score,
-
       reasoning: selected.reasoning,
-
       evaluatedAtTick: context.tick,
     };
   }
 
-  static evaluatePosition(
-  position: { x: number; y: number },
-  slot: FormationSlot,
-  phase: "ATTACKING" | "DEFENDING",
-  fluidity: FormationFluidity,
-): number {
-  return PositioningService.getPositioningPreference(
-    position,
-    slot,
-    phase,
-    fluidity,
-  );
-}
+  evaluatePosition(
+    position: { x: number; y: number },
+    slot: FormationSlot,
+    phase: "ATTACKING" | "DEFENDING",
+    fluidity: FormationFluidity,
+  ): number {
+    return PositioningService.getPositioningPreference(
+      position,
+      slot,
+      phase,
+      fluidity,
+    );
+  }
 }
