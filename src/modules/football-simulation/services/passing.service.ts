@@ -6,6 +6,7 @@ import type {
   PassOptions,
   PassResult,
 } from "../types/passing.types.js";
+import { BALL_CONSTANTS } from "../constants/ball.constants.js";
 
 import { PitchService } from "./pitch.service.js";
 import { BallInteractionService } from "./ball-interaction.service.js";
@@ -66,7 +67,7 @@ export class PassingService {
       actualTargetPosition.x - ball.position.x,
     );
 
-    const speed = this.getPassSpeed(options.type);
+    const speed = this.getPassSpeed(options.type, distance);
 
     const verticalSpeed = this.getVerticalSpeed(options.type);
 
@@ -155,18 +156,26 @@ private getTargetPosition(
     });
   }
 
-  private getPassSpeed(type: PassOptions["type"]): number {
-    switch (type) {
-      case "SHORT":
-        return PASSING_CONSTANTS.SHORT_PASS_SPEED;
-
-      case "THROUGH":
-        return PASSING_CONSTANTS.THROUGH_BALL_SPEED;
-
-      case "LONG":
-        return PASSING_CONSTANTS.LONG_PASS_SPEED;
-    }
+  private getPassSpeed(type: PassOptions["type"], distance: number): number {
+  switch (type) {
+    case "SHORT":
+      return this.getGroundPassSpeed(
+        distance,
+        PASSING_CONSTANTS.SHORT_PASS_ARRIVAL_SPEED,
+        PASSING_CONSTANTS.SHORT_PASS_MIN_SPEED,
+        PASSING_CONSTANTS.SHORT_PASS_MAX_SPEED,
+      );
+    case "THROUGH":
+      return this.getGroundPassSpeed(
+        distance,
+        PASSING_CONSTANTS.THROUGH_BALL_ARRIVAL_SPEED,
+        PASSING_CONSTANTS.THROUGH_BALL_MIN_SPEED,
+        PASSING_CONSTANTS.THROUGH_BALL_MAX_SPEED,
+      );
+    case "LONG":
+      return PASSING_CONSTANTS.LONG_PASS_SPEED;
   }
+}
 
   private getVerticalSpeed(type: PassOptions["type"]): number {
     switch (type) {
@@ -179,6 +188,19 @@ private getTargetPosition(
       case "LONG":
         return PASSING_CONSTANTS.LONG_PASS_VERTICAL_SPEED;
     }
+  }
+
+  private getGroundPassSpeed(
+    distance: number,
+    arrivalSpeed: number,
+    minSpeed: number,
+    maxSpeed: number,
+  ): number {
+    const speed = Math.sqrt(
+      arrivalSpeed * arrivalSpeed +
+        2 * BALL_CONSTANTS.GROUND_FRICTION * distance,
+    );
+    return Math.max(minSpeed, Math.min(maxSpeed, speed));
   }
 
   private failedResult(

@@ -57,6 +57,7 @@ export class MatchEngineService {
       updatedState = PlayerStaminaService.updateStamina(
         updatedState,
         deltaTime,
+        player.attributes.stamina,
       );
 
       updatedStates[player.id] = updatedState;
@@ -80,6 +81,10 @@ startSecondHalf(match: MatchState): MatchState {
   if (match.status !== "HALF_TIME") {
     throw new Error("Match is not at half-time");
   }
+  const recover = (states: MatchState["homeTeamState"]["playerStates"]) =>
+    Object.fromEntries(
+      Object.entries(states).map(([id, s]) => [id, PlayerStaminaService.applyHalfTimeRecovery(s)]),
+    );
 
   return {
     ...match,
@@ -90,6 +95,8 @@ startSecondHalf(match: MatchState): MatchState {
 
     homeDirection: "RIGHT_TO_LEFT",
     awayDirection: "LEFT_TO_RIGHT",
+    homeTeamState: { ...match.homeTeamState, playerStates: recover(match.homeTeamState.playerStates) },
+    awayTeamState: { ...match.awayTeamState, playerStates: recover(match.awayTeamState.playerStates) },
   };
 }
 

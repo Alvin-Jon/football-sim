@@ -4,7 +4,7 @@ import type { BallState } from "../types/match.types.js";
 import type {
   ReceivingResult,
 } from "../types/receiving.types.js";
-
+import { BALL_INTERACTION_CONSTANTS } from "../constants/ball-interaction.constants.js";
 import { PitchService } from "./pitch.service.js";
 import { BallInteractionService } from "./ball-interaction.service.js";
 
@@ -16,90 +16,70 @@ export class ReceivingService {
     private readonly random: () => number = Math.random,
   ) {}
 
-  attemptReceive(
-    player: Player,
-    playerState: PlayerMatchState,
-    teamId: string,
-    ball: BallState,
-  ): ReceivingResult {
-    const distance = PitchService.getDistance(
-      playerState.position,
-      ball.position,
-    );
 
-    // Another player already controls the ball.
-    if (ball.possessionPlayerId !== null) {
-      return this.result(player.id, "NOT_READY", 0, distance);
-    }
+attemptReceive(
+  player: Player,
+  playerState: PlayerMatchState,
+  teamId: string,
+  ball: BallState,
+  allowChase = true,
+): ReceivingResult {
+  const distance = PitchService.getDistance(playerState.position, ball.position);
 
-    // Player is too far away to react to the ball.
-    if (distance > RECEIVING_CONSTANTS.ANTICIPATION_RADIUS) {
-      return this.result(player.id, "NOT_READY", 0, distance);
-    }
-
-    // Player moves towards the incoming ball.
-    if (distance > RECEIVING_CONSTANTS.RECEIVING_RADIUS) {
-      playerState.targetPosition = ball.position;
-      playerState.isMoving = true;
-      playerState.currentAction = "MOVING";
-
-      return this.result(
-        player.id,
-        "MOVING_TO_BALL",
-        0,
-        distance,
-      );
-    }
-
-    const controlChance = this.calculateControlChance(
-      player,
-      ball,
-    );
-
-    // Attempt first touch.
-    if (this.random() > controlChance) {
-      return this.result(
-        player.id,
-        "MISCONTROLLED",
-        controlChance,
-        distance,
-      );
-    }
-
-    // Reduce incoming speed to represent the first touch.
-    ball.velocity.x *=
-      RECEIVING_CONSTANTS.FIRST_TOUCH_SPEED_RETENTION;
-
-    ball.velocity.y *=
-      RECEIVING_CONSTANTS.FIRST_TOUCH_SPEED_RETENTION;
-
-    const controlled = this.ballInteractionService.tryControl(
-      player,
-      playerState,
-      teamId,
-      ball,
-    );
-
-    if (!controlled) {
-      return this.result(
-        player.id,
-        "NOT_READY",
-        controlChance,
-        distance,
-      );
-    }
-
-    playerState.targetPosition = null;
-    playerState.isMoving = false;
-    playerState.currentAction = "IDLE";
-
-    return this.result(
-      player.id,
-      "CONTROLLED",
-      controlChance,
-      distance,
-    );
+  if (ball.possessionPlayerId !== null) {
+    return this.result(player.id, "NOT_READY", 0, distance);
   }
+
+  if (distance > RECEIVING_CONSTANTS.ANTICIPATION_RADIUS) {
+    return this.result(player.id, "NOT_READY", 0, distance);
+  }
+
+  if (distance > RECEIVING_CONSTANTS.RECEIVING_RADIUS) {
+    // Players who are not designated chasers hold their position.
+    if (!allowChase) {
+      return this.result(player.id, "NOT_READY", 0, distance);
+    }
+
+    playerState.targetPosition = { ...ball.position };
+    playerState.isMoving = true;
+    playerState.currentAction = "MOVING";
+
+    return this.result(player.id, "MOVING_TO_BALL", 0, distance);
+  }
+
+  // Too high to control: don't touch it (and don't slow it down).
+  if (ball.height > BALL_INTERACTION_CONSTANTS.MAX_CONTROL_HEIGHT) {
+    return this.result(player.id, "NOT_READY", 0, distance);
+  }
+
+  const controlChance = this.calculateControlChance(player, ball);
+
+  if (this.random() > controlChance) {
+    return this.result(player.id, "MISCONTROLLED", controlChance, distance);
+  }
+
+  const originalVelocity = { ...ball.velocity };
+  ball.velocity.x *= RECEIVING_CONSTANTS.FIRST_TOUCH_SPEED_RETENTION;
+  ball.velocity.y *= RECEIVING_CONSTANTS.FIRST_TOUCH_SPEED_RETENTION;
+
+  const controlled = this.ballInteractionService.tryControl(
+    player,
+    playerState,
+    teamId,
+    ball,
+  );
+
+  if (!controlled) {
+    ball.velocity = originalVelocity;
+    return this.result(player.id, "NOT_READY", controlChance, distance);
+  }
+
+  playerState.targetPosition = null;
+  playerState.isMoving = false;
+  playerState.currentAction = "IDLE";
+
+  return this.result(player.id, "CONTROLLED", controlChance, distance);
+}
 
   private calculateControlChance(
     player: Player,

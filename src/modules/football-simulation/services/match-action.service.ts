@@ -4,6 +4,7 @@ import type {
   DecisionResult,
 } from "../types/decision.types.js";
 import type { Vector2D } from "../types/pitch.types.js";
+import type { FormationSlot } from "../types/formation.types.js";
 import type { GoalkeeperContext } from "../types/goalkeeper.types.js";
 import type { MatchState, PlayingDirection } from "../types/match.types.js";
 import type { Player } from "../types/player.types.js";
@@ -31,6 +32,7 @@ import { PitchService } from "./pitch.service.js";
 import { ReceivingService } from "./receiving.service.js";
 import { ShootingService } from "./shooting.service.js";
 import { MatchStatisticsService } from "./match-statistics.service.js";
+import { FormationPositioningService } from "./formation-positioning.service.js";
 
 
 interface PendingPass {
@@ -237,6 +239,19 @@ export class MatchActionService {
         PitchService.getDistance(b.state.position, match.ball.position),
     );
 
+    // Only the two closest players per team (plus the intended receiver of
+    // a pass) may run towards a loose ball. Everyone can still control it
+    // if it reaches them.
+    const chasers = new Set<string>();
+    for (const teamId of [match.homeTeam.id, match.awayTeam.id]) {
+      candidates
+        .filter(({ player }) => this.getPlayerTeamId(match, player.id) === teamId)
+        .slice(0, 2)
+        .forEach(({ player }) => chasers.add(player.id));
+    }
+    const pendingPass = this.pendingPasses.get(match.id);
+    if (pendingPass?.receiverId) chasers.add(pendingPass.receiverId);
+
     for (const { player, state } of candidates) {
       if (match.ball.possessionPlayerId !== null) return;
 
@@ -245,6 +260,7 @@ export class MatchActionService {
         state,
         this.getPlayerTeamId(match, player.id),
         match.ball,
+        chasers.has(player.id),
       );
 
       if (match.ball.possessionPlayerId === player.id) {
@@ -510,13 +526,42 @@ export class MatchActionService {
       : 0;
     const decisionPlayers = this.getDecisionPlayers(team, teamState);
 
+    const phase = match.ball.possessionTeamId === null
+      ? "TRANSITION"
+      : match.ball.possessionTeamId === team.id
+        ? "ATTACKING"
+        : "DEFENDING";
+
+    // Rank among teammates by distance to the ball (0 = closest).
+    const ballDistance = PitchService.getDistance(
+      state.position,
+      match.ball.position,
+    );
+    const ballRank = decisionPlayers.filter(
+      (item) =>
+        item.player.id !== player.id &&
+        item.player.position !== "GK" &&
+        PitchService.getDistance(item.state.position, match.ball.position) <
+          ballDistance,
+    ).length;
+
+    const slot = this.getFormationSlot(team, player);
+    const formation = slot
+      ? {
+          ...FormationPositioningService.getShape(
+            slot,
+            phase,
+            match.ball.position,
+            direction,
+            team.tactics.formationFluidity,
+          ),
+          ballRank,
+        }
+      : undefined;
+
     return {
       tick: match.tick,
-      phase: match.ball.possessionTeamId === null
-        ? "TRANSITION"
-        : match.ball.possessionTeamId === team.id
-          ? "ATTACKING"
-          : "DEFENDING",
+      phase,
       attackingDirection: direction,
       ball: {
         position: match.ball.position,
@@ -532,6 +577,58 @@ export class MatchActionService {
         x: goalX,
         y: PITCH_DIMENSIONS.width / 2,
       },
+      ...(formation && { formation }),
+    };
+  }
+
+  // Finds the formation slot for a player. When several players share a
+  // position name (e.g. two CBs) they are matched to slots in order.
+  private getFormationSlot(
+    team: Team,
+    player: Player,
+  ): FormationSlot | undefined {
+    const slots = team.formation.slots.filter(
+      (slot) => slot.position === player.position,
+    );
+    const samePosition = team.players.filter(
+      (candidate) => candidate.position === player.position,
+    );
+
+    return slots[samePosition.indexOf(player)] ?? slots[0];
+  }
+
+  // Hard limit: a non-chasing player's movement target cannot leave their
+  // roam radius around the formation shape position.
+  private constrainToFormation(
+    decision: DecisionResult,
+    context: DecisionContext,
+  ): DecisionResult {
+    const formation = context.formation;
+    const target = decision.targetPosition;
+
+    if (!formation || !target) return decision;
+
+    const isChaser = formation.ballRank < 2;
+
+    if (isChaser && context.phase === "TRANSITION") return decision;
+
+    const roam = formation.roamRadius * (isChaser ? 1.6 : 1);
+    const distance = PitchService.getDistance(target, formation.shapePosition);
+
+    if (distance <= roam) return decision;
+
+    const ratio = roam / distance;
+
+    return {
+      ...decision,
+      targetPosition: {
+        x:
+          formation.shapePosition.x +
+          (target.x - formation.shapePosition.x) * ratio,
+        y:
+          formation.shapePosition.y +
+          (target.y - formation.shapePosition.y) * ratio,
+      },
     };
   }
 
@@ -545,13 +642,20 @@ export class MatchActionService {
     decision: DecisionResult,
   ): void {
     switch (decision.action) {
+      case "PRESS":
+        this.actionEngine.execute(state, decision, match.tick);
+        return;
+
       case "MOVE":
       case "SUPPORT":
       case "MAKE_RUN":
-      case "PRESS":
       case "MARK":
       case "TRACK_BACK":
-        this.actionEngine.execute(state, decision, match.tick);
+        this.actionEngine.execute(
+          state,
+          this.constrainToFormation(decision, context),
+          match.tick,
+        );
         return;
 
       case "INTERCEPT": {

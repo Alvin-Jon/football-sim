@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { MatchStatisticsService } from "../modules/football-simulation/services/match-statistics.service.js";
+
 import { FORMATION_433 } from "../modules/football-simulation/formations/4-3-3.formation.js";
 
 import { MatchInitializationService } from "../modules/football-simulation/services/match-initialization.service.js";
@@ -8,6 +8,8 @@ import { MatchEngineService } from "../modules/football-simulation/services/matc
 import type { Player } from "../modules/football-simulation/types/player.types.js";
 import type { Team } from "../modules/football-simulation/types/team.types.js";
 import type { PlayerAttributes } from "../modules/football-simulation/types/player.types.js";
+
+import { MatchTUI } from "../tui/match-tui.js";
 
 const TICK_RATE = 20;
 const HALF_DURATION = 45 * 60;
@@ -48,10 +50,7 @@ function generateAttributes(): PlayerAttributes {
   };
 }
 
-function generateTeam(
-  id: string,
-  name: string,
-): Team {
+function generateTeam(id: string, name: string): Team {
   const players: Player[] = FORMATION_433.slots.map(
     (slot, index) => ({
       id: `${id}-player-${index + 1}`,
@@ -76,198 +75,103 @@ function generateTeam(
   };
 }
 
-function runHalf(
+async function runHalf(
   match: ReturnType<typeof MatchInitializationService.initialize>,
   half: 1 | 2,
+  tui: MatchTUI,
 ) {
   const targetElapsedSeconds = half * HALF_DURATION;
 
-  let lastHolder: string | null = null;
+  while (match.clock.elapsedSeconds < targetElapsedSeconds) {
+    match = engine.tick(match);
 
-while (match.clock.elapsedSeconds < targetElapsedSeconds) {
-  match = engine.tick(match);
+    // Update the terminal interface.
+    tui.update(match);
 
-  const holder = match.ball.possessionPlayerId;
-  if (holder !== lastHolder) {
-    console.log(
-      `t=${match.tick} ${match.clock.minute}' holder ${lastHolder} -> ${holder} ` +
-      `ball (${match.ball.position.x.toFixed(1)}, ${match.ball.position.y.toFixed(1)})`,
-    );
-    lastHolder = holder;
+    // Yield periodically so Blessed can process keyboard events.
+    if (match.tick % 5 === 0) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
   }
 
-  if (match.tick % (TICK_RATE * 60) === 0) {
-    const states = [
-      ...Object.values(match.homeTeamState.playerStates),
-      ...Object.values(match.awayTeamState.playerStates),
-    ];
-    const avgStamina =
-      states.reduce((sum, s) => sum + s.stamina, 0) / states.length;
-    console.log(
-      `min ${match.clock.minute} | avgStamina ${avgStamina.toFixed(1)} ` +
-      `| moving ${states.filter((s) => s.isMoving).length} ` +
-      `| ball speed ${Math.hypot(match.ball.velocity.x, match.ball.velocity.y).toFixed(2)}`,
-    );
-  }
-}
+  tui.update(match);
 
   return match;
 }
 
-function logMatchState(
-  match: ReturnType<typeof MatchInitializationService.initialize>,
-) {
-  const { home, away } = match.statistics;
-
-  const possession =
-    MatchStatisticsService.getPossessionPercentage(match);
-
-  const passingAccuracy =
-    MatchStatisticsService.getPassingAccuracy(match);
-
-  console.log("\n========== MATCH STATISTICS ==========\n");
-
-  console.table([
-    {
-      Statistic: "Goals",
-      Home: home.goals,
-      Away: away.goals,
-    },
-    {
-      Statistic: "Possession",
-      Home: `${possession.home}%`,
-      Away: `${possession.away}%`,
-    },
-    {
-      Statistic: "Passes Attempted",
-      Home: home.passesAttempted,
-      Away: away.passesAttempted,
-    },
-    {
-      Statistic: "Passes Completed",
-      Home: home.passesCompleted,
-      Away: away.passesCompleted,
-    },
-    {
-      Statistic: "Passing Accuracy",
-      Home: `${passingAccuracy.home}%`,
-      Away: `${passingAccuracy.away}%`,
-    },
-    {
-      Statistic: "Shots",
-      Home: home.shots,
-      Away: away.shots,
-    },
-    {
-      Statistic: "Shots on Target",
-      Home: home.shotsOnTarget,
-      Away: away.shotsOnTarget,
-    },
-    {
-      Statistic: "Tackles Attempted",
-      Home: home.tacklesAttempted,
-      Away: away.tacklesAttempted,
-    },
-    {
-      Statistic: "Tackles Won",
-      Home: home.tacklesWon,
-      Away: away.tacklesWon,
-    },
-    {
-      Statistic: "Interceptions",
-      Home: home.interceptions,
-      Away: away.interceptions,
-    },
-    {
-      Statistic: "Goalkeeper Saves",
-      Home: home.saves,
-      Away: away.saves,
-    },
-  ]);
-
-  console.log("\n======================================\n");
-}
-
 async function simulateMatch() {
-  console.log("Creating teams...");
+  const tui = new MatchTUI();
 
-  const homeTeam = generateTeam("home", "Home FC");
-  const awayTeam = generateTeam("away", "Away FC");
+  try {
+    // Generate teams.
+    const homeTeam = generateTeam("home", "Home FC");
+    const awayTeam = generateTeam("away", "Away FC");
 
-  console.log("Initializing match...");
+    // Initialize match.
+    let match = MatchInitializationService.initialize(
+      "test-match-001",
+      homeTeam,
+      awayTeam,
+    );
 
-  let match = MatchInitializationService.initialize(
-    "test-match-001",
-    homeTeam,
-    awayTeam,
-  );
+    // Validate teams.
+    assert.equal(homeTeam.players.length, 11);
+    assert.equal(awayTeam.players.length, 11);
 
-  assert.equal(homeTeam.players.length, 11);
-  assert.equal(awayTeam.players.length, 11);
+    assert.equal(
+      Object.keys(match.homeTeamState.playerStates).length,
+      11,
+    );
 
-  assert.equal(
-    Object.keys(match.homeTeamState.playerStates).length,
-    11,
-  );
+    assert.equal(
+      Object.keys(match.awayTeamState.playerStates).length,
+      11,
+    );
 
-  assert.equal(
-    Object.keys(match.awayTeamState.playerStates).length,
-    11,
-  );
+    // Start match.
+    match = engine.start(match);
 
-  console.log("Both teams initialized successfully.");
+    assert.equal(match.status, "IN_PROGRESS");
 
-  console.log("Starting match...");
+    // FIRST HALF
+    match = await runHalf(match, 1, tui);
 
-  match = engine.start(match);
+    assert.equal(match.clock.minute, 45);
+    assert.equal(match.clock.half, 1);
 
-  assert.equal(match.status, "IN_PROGRESS");
+    // HALF TIME
+    match = engine.finishFirstHalf(match);
 
-  console.log("First half started.");
+    assert.equal(match.status, "HALF_TIME");
 
-  match = runHalf(match, 1);
+    tui.update(match);
 
-  assert.equal(match.clock.minute, 45);
-  assert.equal(match.clock.half, 1);
+    // SECOND HALF
+    match = engine.startSecondHalf(match);
 
-  logMatchState(match);
+    assert.equal(match.status, "IN_PROGRESS");
+    assert.equal(match.clock.half, 2);
 
-  console.log("Finishing first half...");
+    assert.equal(match.homeDirection, "RIGHT_TO_LEFT");
+    assert.equal(match.awayDirection, "LEFT_TO_RIGHT");
 
-  match = engine.finishFirstHalf(match);
+    match = await runHalf(match, 2, tui);
 
-  assert.equal(match.status, "HALF_TIME");
+    assert.equal(match.clock.minute, 90);
+    assert.equal(match.clock.half, 2);
 
-  console.log("Half-time reached.");
+    // FULL TIME
+    match = engine.finishMatch(match);
 
-  console.log("Starting second half...");
+    assert.equal(match.status, "FINISHED");
 
-  match = engine.startSecondHalf(match);
+    // Display final match state.
+    tui.update(match);
 
-  assert.equal(match.status, "IN_PROGRESS");
-  assert.equal(match.clock.half, 2);
-
-  assert.equal(match.homeDirection, "RIGHT_TO_LEFT");
-  assert.equal(match.awayDirection, "LEFT_TO_RIGHT");
-
-  console.log("Second half started.");
-
-  match = runHalf(match, 2);
-
-  assert.equal(match.clock.minute, 90);
-  assert.equal(match.clock.half, 2);
-
-  logMatchState(match);
-
-  console.log("Finishing match...");
-
-  match = engine.finishMatch(match);
-
-  assert.equal(match.status, "FINISHED");
-
-  console.log("\nMATCH SIMULATION COMPLETED SUCCESSFULLY");
-
-  logMatchState(match);
+  } catch (error) {
+    tui.destroy();
+    throw error;
+  }
 }
 
 simulateMatch().catch((error: unknown) => {

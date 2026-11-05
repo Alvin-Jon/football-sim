@@ -42,8 +42,7 @@ export class PlayerStaminaService {
       recovery = c.IDLE_RECOVERY;
     }
 
-    const change =
-      (recovery * recoveryMultiplier - drain * drainMultiplier) * deltaTime;
+    const change = (recovery * recoveryMultiplier - drain * drainMultiplier) * deltaTime;
 
     return {
       ...state,
@@ -51,7 +50,7 @@ export class PlayerStaminaService {
     };
   }
 
-  /** Partial recovery at half-time. */
+  /* Partial recovery at half-time. */
   static applyHalfTimeRecovery(state: PlayerMatchState): PlayerMatchState {
     return {
       ...state,

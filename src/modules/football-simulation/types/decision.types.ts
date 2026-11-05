@@ -60,4 +60,10 @@ export interface DecisionContext {
   opponents: DecisionPlayer[];
 
   goalPosition: Vector2D;
+
+  formation?: {
+  shapePosition: Vector2D;
+  roamRadius: number;
+  ballRank: number;
+};
 }

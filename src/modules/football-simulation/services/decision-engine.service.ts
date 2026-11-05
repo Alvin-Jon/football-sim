@@ -17,6 +17,18 @@ import type { FormationSlot } from "../types/formation.types.js";
 import type { FormationFluidity } from "../types/formation.types.js";
 
 export class DecisionEngineService {
+  // How many players per team may leave their position to chase the ball.
+  private static readonly CHASER_COUNT = 2;
+
+  // How many players (by closeness to the ball) offer close support.
+  private static readonly SUPPORT_COUNT = 3;
+
+  // Maximum score bonus for standing exactly on the shape position.
+  private static readonly SHAPE_BONUS = 30;
+
+  // Score lost per metre outside the roam radius.
+  private static readonly SHAPE_PENALTY_PER_METRE = 3;
+
   private readonly positionService = new DecisionPositionService();
   private readonly evaluationService = new DecisionEvaluationService();
   private readonly pitchService = new PitchService();
@@ -141,9 +153,15 @@ export class DecisionEngineService {
   private generateOffBallActions(
     context: DecisionContext,
   ): DecisionCandidate[] {
-    const candidates: DecisionCandidate[] = [];
+    let candidates: DecisionCandidate[] = [];
 
+    const formation = context.formation;
     const playerPosition = context.player.state.position;
+
+    // Only the players closest to the ball may chase it.
+    const isChaser =
+      !formation ||
+      formation.ballRank < DecisionEngineService.CHASER_COUNT;
 
     const nearestOpponent = this.findNearestOpponent(
       playerPosition,
@@ -157,20 +175,22 @@ export class DecisionEngineService {
     const defensiveTarget = ballCarrier ?? nearestOpponent;
 
     if (context.phase === "DEFENDING") {
-      // Press the opponent closest to the ball
       if (defensiveTarget) {
-        candidates.push({
-          action: "PRESS",
-          score: 0,
-          targetPosition: defensiveTarget.state.position,
-          targetPlayerId: defensiveTarget.player.id,
-          reasoning: ["Apply pressure to the opposition"],
-        });
-
         const distance = PitchService.getDistance(
           playerPosition,
           defensiveTarget.state.position,
         );
+
+        // Press only if you are a designated chaser or already close.
+        if (isChaser || distance <= 6) {
+          candidates.push({
+            action: "PRESS",
+            score: 0,
+            targetPosition: defensiveTarget.state.position,
+            targetPlayerId: defensiveTarget.player.id,
+            reasoning: ["Apply pressure to the opposition"],
+          });
+        }
 
         if (ballCarrier && distance <= 3) {
           candidates.push({
@@ -191,8 +211,15 @@ export class DecisionEngineService {
         }
       }
 
-      // Mark nearest opponent
-      if (nearestOpponent) {
+      // Zonal marking: only mark opponents inside your own zone.
+      if (
+        nearestOpponent &&
+        (!formation ||
+          PitchService.getDistance(
+            nearestOpponent.state.position,
+            formation.shapePosition,
+          ) <= formation.roamRadius)
+      ) {
         candidates.push({
           action: "MARK",
           score: 0,
@@ -202,25 +229,33 @@ export class DecisionEngineService {
         });
       }
 
-      // NOTE: INTERCEPT is intentionally NOT generated here. In the
-      // DEFENDING phase the opponent already has the ball, so there is
-      // nothing to intercept; the action would stop the player and do
-      // nothing. Interceptions only make sense for a loose ball
-      // (TRANSITION phase, below).
-
-      // Defensive recovery
+      // Recover to the defensive shape (NOT to the ball).
       candidates.push({
         action: "TRACK_BACK",
         score: 0,
-        targetPosition: context.ball.position,
-        reasoning: ["Defensive recovery"],
+        targetPosition: formation?.shapePosition ?? context.ball.position,
+        reasoning: ["Recover to defensive shape"],
       });
     } else if (context.phase === "ATTACKING") {
-      candidates.push(
-        ...this.movementEvaluationService.generateCandidates(context),
-      );
-    } else {
-      // No clear possession: transition (loose ball)
+      candidates = this.movementEvaluationService.generateCandidates(context);
+
+      if (formation) {
+        // Only the players nearest the ball offer close support.
+        if (formation.ballRank > DecisionEngineService.SUPPORT_COUNT) {
+          candidates = candidates.filter(
+            (candidate) => candidate.action !== "SUPPORT",
+          );
+        }
+
+        candidates.push({
+          action: "MOVE",
+          score: 0,
+          targetPosition: formation.shapePosition,
+          reasoning: ["Hold attacking shape"],
+        });
+      }
+    } else if (isChaser) {
+      // Loose ball: only the nearest players go for it.
       candidates.push({
         action: "MOVE",
         score: 0,
@@ -235,16 +270,70 @@ export class DecisionEngineService {
         reasoning: ["Provide support during transition"],
       });
 
-      // Attempt to cut out / win the loose ball.
       candidates.push({
         action: "INTERCEPT",
         score: 0,
         targetPosition: context.ball.position,
         reasoning: ["Attempt to win the loose ball"],
       });
+    } else {
+      candidates.push({
+        action: "MOVE",
+        score: 0,
+        targetPosition: formation?.shapePosition ?? context.ball.position,
+        reasoning: ["Hold shape while others contest the ball"],
+      });
     }
 
     return candidates;
+  }
+
+  // Rewards targets near the player's shape position and penalises targets
+  // outside their roam radius, so the formation is respected.
+  private evaluateShapeAdherence(
+    context: DecisionContext,
+    candidate: DecisionCandidate,
+  ): number {
+    const formation = context.formation;
+
+    if (!formation || !candidate.targetPosition) return 0;
+
+    const constrained: DecisionAction[] = [
+      "MOVE",
+      "SUPPORT",
+      "MAKE_RUN",
+      "MARK",
+      "TRACK_BACK",
+    ];
+
+    if (!constrained.includes(candidate.action)) return 0;
+
+    const isChaser =
+      formation.ballRank < DecisionEngineService.CHASER_COUNT;
+
+    // Chasers may abandon their position to win a loose ball.
+    if (isChaser && context.phase === "TRANSITION") return 0;
+
+    const roam = formation.roamRadius * (isChaser ? 1.6 : 1);
+
+    const distance = PitchService.getDistance(
+      candidate.targetPosition,
+      formation.shapePosition,
+    );
+
+    const sigma = roam * 0.6;
+
+    let score =
+      DecisionEngineService.SHAPE_BONUS *
+      Math.exp(-0.5 * (distance / sigma) ** 2);
+
+    if (distance > roam) {
+      score -=
+        (distance - roam) *
+        DecisionEngineService.SHAPE_PENALTY_PER_METRE;
+    }
+
+    return score;
   }
 
   private findNearestOpponent(
@@ -307,13 +396,19 @@ export class DecisionEngineService {
             candidate,
           );
 
+        const shapeScore = this.evaluateShapeAdherence(
+          context,
+          candidate,
+        );
+
         return {
           ...candidate,
           score:
             baseScore +
             passingScore +
             movementScore +
-            defensiveScore,
+            defensiveScore +
+            shapeScore,
         };
       },
     );
