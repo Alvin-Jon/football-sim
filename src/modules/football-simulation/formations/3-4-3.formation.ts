@@ -35,13 +35,13 @@ export const FORMATION_343: FormationDefinition = {
     // Wingbacks
     {
       id: "LAM",
-      position: "AM",
+      position: "LAM",
       attackingPosition: { x: 65, y: 5 },
       defensivePosition: { x: 35, y: 5 },
     },
     {
       id: "RAM",
-      position: "AM",
+      position: "RAM",
       attackingPosition: { x: 65, y: 63 },
       defensivePosition: { x: 35, y: 63 },
     },
