@@ -56,8 +56,15 @@ export class MatchActionService {
   private static readonly TACKLE_COOLDOWN_TICKS = 30;
 
   // A player who has just gained the ball cannot be tackled for this long
-  // (20 ticks = 1s). Stops the instant tackle ping-pong.
-  private static readonly POSSESSION_SHIELD_TICKS = 20;
+  // (6 ticks = 0.3s). Stops the instant tackle ping-pong.
+  private static readonly POSSESSION_SHIELD_TICKS = 6;
+
+  // A player must keep the ball at least this long before passing, crossing
+  // or shooting (30 ticks = 1.5s), or this long if an opponent is close
+  // (10 ticks = 0.5s). Controls the tempo of the game.
+  private static readonly MIN_HOLD_TICKS = 30;
+  private static readonly PRESSURE_HOLD_TICKS = 10;
+  private static readonly PRESSURE_DISTANCE = 4;
 
   private readonly random: () => number;
   private readonly decisionEngine = new DecisionEngineService();
@@ -91,6 +98,7 @@ export class MatchActionService {
   private readonly releaseLockouts = new Map<string, number>();
   private readonly tackleCooldowns = new Map<string, number>();
   private readonly possessionShields = new Map<string, number>();
+  private readonly possessionStarts = new Map<string, number>();
   private lastHolderId: string | null = null;
   private readonly positionService = new DecisionPositionService();
 
@@ -176,10 +184,58 @@ export class MatchActionService {
   }
 
   private grantPossessionShield(match: MatchState, playerId: string): void {
+    this.possessionStarts.set(playerId, match.tick);
     this.possessionShields.set(
       playerId,
       match.tick + MatchActionService.POSSESSION_SHIELD_TICKS,
     );
+  }
+
+  // True if the carrier has not held the ball long enough to release it yet.
+  private mustKeepBall(
+    match: MatchState,
+    playerId: string,
+    context: DecisionContext,
+  ): boolean {
+    const started = this.possessionStarts.get(playerId);
+    if (started === undefined) return false;
+
+    const nearestOpponent = context.opponents.reduce(
+      (nearest, opponent) =>
+        Math.min(
+          nearest,
+          PitchService.getDistance(
+            context.player.state.position,
+            opponent.state.position,
+          ),
+        ),
+      Infinity,
+    );
+
+    const holdTicks =
+      nearestOpponent < MatchActionService.PRESSURE_DISTANCE
+        ? MatchActionService.PRESSURE_HOLD_TICKS
+        : MatchActionService.MIN_HOLD_TICKS;
+
+    return match.tick - started < holdTicks;
+  }
+
+  // Carry the ball forward a few metres while waiting to release it.
+  private carryBall(
+    player: Player,
+    state: PlayerMatchState,
+    context: DecisionContext,
+  ): void {
+    this.cancelRunningAction(player.id, state);
+    state.targetPosition = PitchService.clampPosition(
+      this.positionService.getForwardPosition(
+        state.position,
+        3,
+        context.attackingDirection,
+      ),
+    );
+    state.isMoving = true;
+    state.currentAction = "DRIBBLING";
   }
 
   private isShielded(match: MatchState, playerId: string): boolean {
@@ -435,9 +491,11 @@ export class MatchActionService {
         goalkeeper.id,
         match.ball,
         {
-          horizontalSpeed: 18,
-          verticalSpeed: 5,
-          direction: direction > 0 ? 0 : Math.PI,
+          horizontalSpeed: 20,
+          verticalSpeed: 12,
+          // Spread the punt up to ~23 degrees either side.
+          direction:
+            (direction > 0 ? 0 : Math.PI) + (this.random() - 0.5) * 0.8,
         },
       );
 
@@ -685,14 +743,26 @@ export class MatchActionService {
       case "PASS":
       case "THROUGH_BALL":
       case "LONG_BALL":
+        if (this.mustKeepBall(match, player.id, context)) {
+          this.carryBall(player, state, context);
+          return;
+        }
         this.executePass(match, team, teamState, player, state, decision);
         return;
 
       case "CROSS":
+        if (this.mustKeepBall(match, player.id, context)) {
+          this.carryBall(player, state, context);
+          return;
+        }
         this.executeCross(match, team, player, state, context, decision);
         return;
 
       case "SHOOT":
+        if (this.mustKeepBall(match, player.id, context)) {
+          this.carryBall(player, state, context);
+          return;
+        }
         this.executeShot(match, team, player, state, context);
         return;
 

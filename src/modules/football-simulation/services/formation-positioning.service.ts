@@ -10,21 +10,10 @@ import { PitchService } from "./pitch.service.js";
 type PlayerLine = "DEFENCE" | "MIDFIELD" | "ATTACK";
 
 export interface FormationShape {
-  /** Where this player should be right now, in match coordinates. */
   shapePosition: Vector2D;
-  /** How far from shapePosition the player may wander. */
   roamRadius: number;
 }
 
-/**
- * Works out where a player should stand to keep the team's formation shape:
- * the slot anchor for the current phase, shifted part of the way toward the
- * ball so the whole team slides with play, then limited by a per-line roam
- * radius.
- *
- * Slot anchors are stored in the left-to-right frame, so positions are mirrored
- * into that frame for the calculation and mirrored back afterwards.
- */
 export class FormationPositioningService {
   // How much of the ball offset each line follows (0 = ignores the ball).
   private static readonly BALL_PULL = {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { FORMATION_433 } from "../modules/football-simulation/formations/4-3-3.formation.js";
+import { FORMATION_433, FORMATION_343, FORMATION_4231_CM, FORMATION_4231_DM  } from "../modules/football-simulation/formations/index.js";
 
 import { MatchInitializationService } from "../modules/football-simulation/services/match-initialization.service.js";
 import { MatchEngineService } from "../modules/football-simulation/services/match-engine.service.js";
@@ -51,7 +51,7 @@ function generateAttributes(): PlayerAttributes {
 }
 
 function generateTeam(id: string, name: string): Team {
-  const players: Player[] = FORMATION_433.slots.map(
+  const players: Player[] = FORMATION_343.slots.map(
     (slot, index) => ({
       id: `${id}-player-${index + 1}`,
       name: `${name} Player ${index + 1}`,
@@ -66,7 +66,7 @@ function generateTeam(id: string, name: string): Team {
     id,
     name,
     players,
-    formation: FORMATION_433,
+    formation: FORMATION_343,
     tactics: {
       style: "POSSESSION",
       mentality: "BALANCED",

@@ -6,12 +6,12 @@ import type {
   PassOptions,
   PassResult,
 } from "../types/passing.types.js";
-import { BALL_CONSTANTS } from "../constants/ball.constants.js";
 
 import { PitchService } from "./pitch.service.js";
 import { BallInteractionService } from "./ball-interaction.service.js";
 
 import { PASSING_CONSTANTS } from "../constants/passing.constants.js";
+import { BALL_CONSTANTS } from "../constants/ball.constants.js";
 
 export class PassingService {
   constructor(
@@ -97,35 +97,35 @@ export class PassingService {
     };
   }
 
-private getTargetPosition(
-  options: PassOptions,
-  receiverState?: PlayerMatchState,
-): Vector2D {
-  if (!receiverState || options.type !== "THROUGH") {
-    return options.targetPosition;
+  private getTargetPosition(
+    options: PassOptions,
+    receiverState?: PlayerMatchState,
+  ): Vector2D {
+    if (!receiverState || options.type !== "THROUGH") {
+      return options.targetPosition;
+    }
+
+    const distance = PitchService.getDistance(
+      receiverState.position,
+      options.targetPosition,
+    );
+
+    const leadRatio = distance > PASSING_CONSTANTS.MAX_LEAD_DISTANCE
+      ? PASSING_CONSTANTS.MAX_LEAD_DISTANCE / distance
+      : 1;
+
+    return {
+      x:
+        receiverState.position.x +
+        receiverState.velocity.x * 0.5 +
+        (options.targetPosition.x - receiverState.position.x) * leadRatio,
+
+      y:
+        receiverState.position.y +
+        receiverState.velocity.y * 0.5 +
+        (options.targetPosition.y - receiverState.position.y) * leadRatio,
+    };
   }
-
-  const distance = PitchService.getDistance(
-    receiverState.position,
-    options.targetPosition,
-  );
-
-  const leadRatio = distance > PASSING_CONSTANTS.MAX_LEAD_DISTANCE
-    ? PASSING_CONSTANTS.MAX_LEAD_DISTANCE / distance
-    : 1;
-
-  return {
-    x:
-      receiverState.position.x +
-      receiverState.velocity.x * 0.5 +
-      (options.targetPosition.x - receiverState.position.x) * leadRatio,
-
-    y:
-      receiverState.position.y +
-      receiverState.velocity.y * 0.5 +
-      (options.targetPosition.y - receiverState.position.y) * leadRatio,
-  };
-}
 
   private calculateAccuracy(player: Player): number {
     const attributeBonus =
@@ -156,26 +156,57 @@ private getTargetPosition(
     });
   }
 
+  // Passes are launched with just enough speed to reach the receiver, rather
+  // than at a fixed speed that overshoots short passes.
   private getPassSpeed(type: PassOptions["type"], distance: number): number {
-  switch (type) {
-    case "SHORT":
-      return this.getGroundPassSpeed(
-        distance,
-        PASSING_CONSTANTS.SHORT_PASS_ARRIVAL_SPEED,
-        PASSING_CONSTANTS.SHORT_PASS_MIN_SPEED,
-        PASSING_CONSTANTS.SHORT_PASS_MAX_SPEED,
-      );
-    case "THROUGH":
-      return this.getGroundPassSpeed(
-        distance,
-        PASSING_CONSTANTS.THROUGH_BALL_ARRIVAL_SPEED,
-        PASSING_CONSTANTS.THROUGH_BALL_MIN_SPEED,
-        PASSING_CONSTANTS.THROUGH_BALL_MAX_SPEED,
-      );
-    case "LONG":
-      return PASSING_CONSTANTS.LONG_PASS_SPEED;
+    switch (type) {
+      case "SHORT":
+        return this.getGroundPassSpeed(
+          distance,
+          PASSING_CONSTANTS.SHORT_PASS_ARRIVAL_SPEED,
+          PASSING_CONSTANTS.SHORT_PASS_MIN_SPEED,
+          PASSING_CONSTANTS.SHORT_PASS_MAX_SPEED,
+        );
+
+      case "THROUGH":
+        return this.getGroundPassSpeed(
+          distance,
+          PASSING_CONSTANTS.THROUGH_BALL_ARRIVAL_SPEED,
+          PASSING_CONSTANTS.THROUGH_BALL_MIN_SPEED,
+          PASSING_CONSTANTS.THROUGH_BALL_MAX_SPEED,
+        );
+
+      case "LONG": {
+        // Horizontal speed so the ball lands near the target after its flight.
+        const flightTime =
+          (2 * PASSING_CONSTANTS.LONG_PASS_VERTICAL_SPEED) /
+          BALL_CONSTANTS.GRAVITY;
+
+        return Math.max(
+          PASSING_CONSTANTS.LONG_PASS_MIN_SPEED,
+          Math.min(
+            PASSING_CONSTANTS.LONG_PASS_MAX_SPEED,
+            distance / flightTime,
+          ),
+        );
+      }
+    }
   }
-}
+
+  // v0 = sqrt(arrival² + 2 × friction × distance)
+  private getGroundPassSpeed(
+    distance: number,
+    arrivalSpeed: number,
+    minSpeed: number,
+    maxSpeed: number,
+  ): number {
+    const speed = Math.sqrt(
+      arrivalSpeed * arrivalSpeed +
+        2 * BALL_CONSTANTS.GROUND_FRICTION * distance,
+    );
+
+    return Math.max(minSpeed, Math.min(maxSpeed, speed));
+  }
 
   private getVerticalSpeed(type: PassOptions["type"]): number {
     switch (type) {
@@ -188,19 +219,6 @@ private getTargetPosition(
       case "LONG":
         return PASSING_CONSTANTS.LONG_PASS_VERTICAL_SPEED;
     }
-  }
-
-  private getGroundPassSpeed(
-    distance: number,
-    arrivalSpeed: number,
-    minSpeed: number,
-    maxSpeed: number,
-  ): number {
-    const speed = Math.sqrt(
-      arrivalSpeed * arrivalSpeed +
-        2 * BALL_CONSTANTS.GROUND_FRICTION * distance,
-    );
-    return Math.max(minSpeed, Math.min(maxSpeed, speed));
   }
 
   private failedResult(

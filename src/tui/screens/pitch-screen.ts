@@ -43,6 +43,9 @@ export class PitchScreen {
   private playerMarkers: blessed.Widgets.BoxElement[] = [];
 
   private ballMarker: blessed.Widgets.BoxElement;
+  private renderInterval = 33; // 10 FPS
+  private lastRenderTime = 0;
+  private renderPending = false;
 
   constructor(screen: blessed.Widgets.Screen) {
     this.screen = screen;
@@ -71,6 +74,26 @@ export class PitchScreen {
     this.screen.append(this.ballMarker);
 
     this.drawPitch();
+  }
+
+  private requestRender() {
+    const now = Date.now();
+
+    if (now - this.lastRenderTime >= this.renderInterval) {
+      this.lastRenderTime = now;
+      this.screen.render();
+      return;
+    }
+
+    if (this.renderPending) return;
+
+    this.renderPending = true;
+
+    setTimeout(() => {
+      this.renderPending = false;
+      this.lastRenderTime = Date.now();
+      this.screen.render();
+    }, this.renderInterval - (now - this.lastRenderTime));
   }
 
   private drawPitch() {
@@ -184,7 +207,7 @@ export class PitchScreen {
       (position.x / 100) * pitchWidth,
     );
 
-    this.screen.render();
+    this.requestRender();
   }
 
   show() {
@@ -195,7 +218,7 @@ export class PitchScreen {
       marker.show();
     }
 
-    this.screen.render();
+    this.requestRender();
   }
 
   hide() {
@@ -206,6 +229,6 @@ export class PitchScreen {
       marker.hide();
     }
 
-    this.screen.render();
+    this.requestRender();
   }
 }

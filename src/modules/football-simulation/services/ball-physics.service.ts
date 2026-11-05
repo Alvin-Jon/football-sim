@@ -75,6 +75,12 @@ export class BallPhysicsService {
 
       const impactVelocity = Math.abs(ball.verticalVelocity);
 
+      // A hard landing scrubs horizontal speed too.
+      if (impactVelocity >= BALL_CONSTANTS.BOUNCE_DAMPING_MIN_IMPACT) {
+        ball.velocity.x *= BALL_CONSTANTS.BOUNCE_HORIZONTAL_RETENTION;
+        ball.velocity.y *= BALL_CONSTANTS.BOUNCE_HORIZONTAL_RETENTION;
+      }
+
       if (
         impactVelocity >= BALL_CONSTANTS.MIN_BOUNCE_VELOCITY
       ) {
