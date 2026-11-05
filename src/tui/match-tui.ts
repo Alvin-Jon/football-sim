@@ -2,7 +2,7 @@ import blessed from "blessed";
 import { MatchStatisticsService } from "../modules/football-simulation/services/match-statistics.service.js";
 import { PitchScreen } from "./screens/pitch-screen.js";
 import type { MatchInitializationService } from "../modules/football-simulation/services/match-initialization.service.js";
-
+import { TeamLineupScreen } from "./screens/team-lineup-screen.js";
 type Match = ReturnType<typeof MatchInitializationService.initialize>;
 
 export class MatchTUI {
@@ -15,7 +15,7 @@ export class MatchTUI {
   private footer: blessed.Widgets.BoxElement;
   private pitch: PitchScreen;
   private currentMatch: Match | null = null;
-
+  private lineup: TeamLineupScreen;
   private paused = false;
 
   constructor() {
@@ -24,7 +24,7 @@ export class MatchTUI {
       title: "Football Simulator",
       fullUnicode: true,
     });
-    
+    this.lineup = new TeamLineupScreen(this.screen);
     this.pitch = new PitchScreen(this.screen);
 
     this.scoreboard = blessed.box({
@@ -75,8 +75,7 @@ export class MatchTUI {
       height: 3,
       border: "line",
       align: "center",
-      content: "[1] Match  [2] Pitch  [3] Stats  [SPACE] Pause  [Q] Quit",
-    });
+      content: "[1] Match  [2] Pitch  [3] Stats  [4] Lineup  [H] Home  [A] Away  [SPACE] Pause  [Q] Quit",    });
 
     this.screen.append(this.scoreboard);
     this.screen.append(this.possession);
@@ -104,10 +103,27 @@ export class MatchTUI {
       this.showStatsScreen();
     });
 
+    this.screen.key(["4"], () => {
+      this.showLineupScreen("HOME");
+    });
+
+    this.screen.key(["h"], () => {
+      if (this.currentMatch) {
+        this.showLineupScreen("HOME");
+      }
+    });
+
+    this.screen.key(["a"], () => {
+      if (this.currentMatch) {
+        this.showLineupScreen("AWAY");
+      }
+    });
+
     this.screen.render();
   }
 
   update(match: Match) {
+    this.currentMatch = match;
     if (this.paused) {
       return;
     }
@@ -172,6 +188,19 @@ export class MatchTUI {
   this.events.show();
 
   this.screen.render();
+}
+
+private showLineupScreen(side: "HOME" | "AWAY") {
+  this.pitch.hide();
+
+  this.scoreboard.hide();
+  this.possession.hide();
+  this.stats.hide();
+  this.events.hide();
+
+  if (this.currentMatch) {
+    this.lineup.update(this.currentMatch, side);
+  }
 }
 
 private showStatsScreen() {

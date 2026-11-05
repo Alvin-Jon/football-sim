@@ -66,6 +66,8 @@ async function simulateMatch() {
     // Start match.
     match = engine.start(match);
 
+    tui.update(match)
+
     assert.equal(match.status, "IN_PROGRESS");
 
     // FIRST HALF

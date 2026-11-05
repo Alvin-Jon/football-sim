@@ -45,11 +45,11 @@ export const MANFIELD: Team = {
   id: "MANFIELD",
   name: "Manfield United",
   formation,
-
+  color: "red",
   tactics: {
     style: "POSSESSION",
     mentality: "BALANCED",
-    formationFluidity: "FLUID",
+    formationFluidity: "RIGID",
   },
 
   players,

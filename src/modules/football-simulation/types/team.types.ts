@@ -28,7 +28,7 @@ export interface TeamTactics {
 export interface Team {
   id: string;
   name: string;
-
+  color: string;
   players: Player[];
 
   formation: FormationDefinition;

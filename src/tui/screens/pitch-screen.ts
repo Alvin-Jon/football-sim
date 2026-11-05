@@ -12,6 +12,7 @@ interface Position {
 interface PitchPlayer {
   player: Player;
   position: Position;
+  color: string;
   team: "HOME" | "AWAY";
 }
 
@@ -46,6 +47,7 @@ export class PitchScreen {
   private renderInterval = 33; // 10 FPS
   private lastRenderTime = 0;
   private renderPending = false;
+  
 
   constructor(screen: blessed.Widgets.Screen) {
     this.screen = screen;
@@ -122,7 +124,7 @@ export class PitchScreen {
   // Resolves both teams' players into pitch coordinates.
   getPitchPlayers(match: Match): PitchPlayer[] {
   const homePlayers = match.homeTeam.players.map((player) => {
-    const playerState = match.homeTeamState.playerStates[player.id]!;
+  const playerState = match.homeTeamState.playerStates[player.id]!;
 
     return {
       player,
@@ -131,12 +133,13 @@ export class PitchScreen {
         y: playerState.position.y,
       },
       team: "HOME" as const,
+      color: match.homeTeam.color
     };
   });
 
   const awayPlayers = match.awayTeam.players.map((player) => {
-    const playerState =
-      match.awayTeamState.playerStates[player.id]!;
+    const playerState = match.awayTeamState.playerStates[player.id]!;
+
 
     return {
       player,
@@ -145,6 +148,7 @@ export class PitchScreen {
         y: playerState.position.y,
       },
       team: "AWAY" as const,
+      color: match.awayTeam.color
     };
   });
 
@@ -178,7 +182,7 @@ export class PitchScreen {
         height: 1,
         content: player.player.position,
         style: {
-          fg: player.team === "HOME" ? "blue" : "red",
+          fg: player.color,
           bold: true,
         },
       });
