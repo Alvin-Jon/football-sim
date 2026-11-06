@@ -11,7 +11,7 @@ import type { Player } from "../types/player.types.js";
 import type { PlayerMatchState } from "../types/player-state.types.js";
 import type { Team } from "../types/team.types.js";
 import type { TeamMatchState } from "../types/team-state.types.js";
-import { debugLog } from "../../../utils/debug-log.js";
+import { debugLog } from "../utils/debug-log.js";
 import { PITCH_DIMENSIONS } from "../constants/pitch.constants.js";
 import { ActionEngineService } from "./action-engine.service.js";
 import { BallInteractionService } from "./ball-interaction.service.js";

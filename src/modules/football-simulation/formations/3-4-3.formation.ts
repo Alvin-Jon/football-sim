@@ -1,4 +1,5 @@
 import type { FormationDefinition } from "../types/formation.types.js";
+import type { PitchDimensions } from "../types/pitch.types.js";
 
 export const FORMATION_343: FormationDefinition = {
   name: "3-4-3",

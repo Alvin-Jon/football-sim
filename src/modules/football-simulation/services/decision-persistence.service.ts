@@ -2,7 +2,7 @@ import type {
   DecisionContext,
   DecisionResult,
 } from "../types/decision.types.js";
-import { debugLog } from "../../../utils/debug-log.js";
+import { debugLog } from "../utils/debug-log.js";
 import type { DecisionMemory } from "../types/decision-memory.types.js";
 
 export class DecisionPersistenceService {

@@ -5,7 +5,7 @@ export type FormationFluidity = "RIGID" | "FLUID";
 
 export interface FormationSlot {
   id: string;
-
+ 
   position: PlayerPosition;
 
   attackingPosition: Vector2D;
@@ -15,4 +15,9 @@ export interface FormationSlot {
 export interface FormationDefinition {
   name: string;
   slots: FormationSlot[];
+}
+
+export interface FormationPosition {
+  x: number;
+  y: number;
 }
