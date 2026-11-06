@@ -17,7 +17,7 @@ const BAYVIEW_PLAYERS: Player[] = [
     PLAYERS.Lamine_Yamal
 ]
 
-const formation = FORMATION_433;
+const formation = FORMATION_4231_DM;
 
 const players: Player[] = BAYVIEW_PLAYERS.map((player, index) => {
   const slot = formation.slots[index];

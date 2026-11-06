@@ -190,6 +190,7 @@ export class DefensiveEvaluationService {
     if (!carrier) {
       return -100;
     }
+    //if (match.ball.possessionPlayerId !== carrier.player.id) return;
 
     const distance = PitchService.getDistance(
       context.player.state.position,
@@ -204,7 +205,7 @@ export class DefensiveEvaluationService {
 
     const attributes = context.player.player.attributes;
 
-    let score = 0;
+    let score = 20; // we should keep adjusting this 
 
     score += attributes.tackling * 0.5;
     score += attributes.anticipation * 0.3;

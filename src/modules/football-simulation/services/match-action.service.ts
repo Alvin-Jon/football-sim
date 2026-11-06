@@ -11,7 +11,7 @@ import type { Player } from "../types/player.types.js";
 import type { PlayerMatchState } from "../types/player-state.types.js";
 import type { Team } from "../types/team.types.js";
 import type { TeamMatchState } from "../types/team-state.types.js";
-
+import { debugLog } from "../../../utils/debug-log.js";
 import { PITCH_DIMENSIONS } from "../constants/pitch.constants.js";
 import { ActionEngineService } from "./action-engine.service.js";
 import { BallInteractionService } from "./ball-interaction.service.js";
@@ -34,7 +34,6 @@ import { ShootingService } from "./shooting.service.js";
 import { MatchStatisticsService } from "./match-statistics.service.js";
 import { FormationPositioningService } from "./formation-positioning.service.js";
 
-
 interface PendingPass {
   passerId: string;
   receiverId: string | null;
@@ -42,29 +41,39 @@ interface PendingPass {
 }
 
 interface PendingShot {
+  assistPlayerId: string | null;
   shooterId: string;
   teamId: string;
+  tick: number;
+}
+
+interface LastCompletedPass {
+  passerId: string;
+  receiverId: string;
+  teamId: string;
+  tick: number;
 }
 
 export class MatchActionService {
-  // After releasing the ball (pass, cross, shot, keeper distribution), a
-  // player cannot re-receive or intercept it for this many ticks.
-  // 10 ticks = 0.5s at 20 ticks per second.
   private static readonly RELEASE_LOCKOUT_TICKS = 10;
-
-  // A tackler must wait this long between attempts (30 ticks = 1.5s).
-  private static readonly TACKLE_COOLDOWN_TICKS = 30;
-
-  // A player who has just gained the ball cannot be tackled for this long
-  // (6 ticks = 0.3s). Stops the instant tackle ping-pong.
-  private static readonly POSSESSION_SHIELD_TICKS = 6;
-
-  // A player must keep the ball at least this long before passing, crossing
-  // or shooting (30 ticks = 1.5s), or this long if an opponent is close
-  // (10 ticks = 0.5s). Controls the tempo of the game.
-  private static readonly MIN_HOLD_TICKS = 30;
+  private static readonly TACKLE_COOLDOWN_TICKS = 60;
+  private static readonly POSSESSION_SHIELD_TICKS = 20;
+  private static readonly MIN_HOLD_TICKS = 60;
   private static readonly PRESSURE_HOLD_TICKS = 10;
   private static readonly PRESSURE_DISTANCE = 4;
+
+  // A pass only counts as an assist if the shot follows within this window
+  // (200 ticks = 10s at 20 ticks per second).
+  private static readonly ASSIST_WINDOW_TICKS = 200;
+
+  // A goal is only credited to a shooter if it follows their shot within this
+  // window. Stops an old, missed shot claiming a later goal.
+  private static readonly SHOT_WINDOW_TICKS = 200;
+
+  // When false, a ball only counts as a goal if it came from a recorded
+  // shot. Passes that roll into the net, and back-passes that miss the
+  // keeper, are treated as dead balls instead.
+  private static readonly ALLOW_NON_SHOT_GOALS = false;
 
   private readonly random: () => number;
   private readonly decisionEngine = new DecisionEngineService();
@@ -89,6 +98,7 @@ export class MatchActionService {
   );
   private readonly goalkeeperAction = new GoalkeeperActionService();
   private readonly goalkeeperDistribution = new GoalkeeperDistributionService();
+
   private readonly goalkeeperSave: GoalkeeperSaveService;
   private readonly goalkeeperSaveExecution = new GoalkeeperSaveExecutionService(
     this.ballInteraction,
@@ -101,6 +111,7 @@ export class MatchActionService {
   private readonly possessionStarts = new Map<string, number>();
   private lastHolderId: string | null = null;
   private readonly positionService = new DecisionPositionService();
+  private readonly lastCompletedPasses = new Map<string, LastCompletedPass>();
 
   constructor(random: () => number = Math.random) {
     this.random = random;
@@ -167,10 +178,6 @@ export class MatchActionService {
 
     return match;
   }
-
-  // ---------------------------------------------------------------------------
-  // Release lockout
-  // ---------------------------------------------------------------------------
 
   private lockOut(match: MatchState, playerId: string): void {
     this.releaseLockouts.set(
@@ -243,16 +250,34 @@ export class MatchActionService {
   }
 
   // Any time a new player gains the ball (reception, interception, keeper
-  // claim, tackle), protect them briefly.
+  // claim, tackle), protect them briefly and end any shot still in flight.
   private trackPossessionChange(match: MatchState): void {
     const holder = match.ball.possessionPlayerId;
-    if (holder !== null && holder !== this.lastHolderId) {
-      this.grantPossessionShield(match, holder);
-    }
-    this.lastHolderId = holder;
-  }
 
-  // ---------------------------------------------------------------------------
+    if (holder !== this.lastHolderId) {
+      if (holder !== null) {
+        const lastPass = this.lastCompletedPasses.get(match.id);
+        const holderTeamId = this.getPlayerTeamId(match, holder);
+
+        // Preserve the pass only if this is the receiver who completed it.
+        const isExpectedReceiver =
+          lastPass?.receiverId === holder &&
+          lastPass.teamId === holderTeamId;
+
+        if (!isExpectedReceiver) {
+          this.lastCompletedPasses.delete(match.id);
+        }
+
+        // Someone controlling the ball means the shot is over (saved,
+        // blocked or rebounded), so it can no longer score.
+        this.pendingShots.delete(match.id);
+
+        this.grantPossessionShield(match, holder);
+      }
+
+      this.lastHolderId = holder;
+    }
+  }
 
   private updateControlledBall(match: MatchState): void {
     const playerId = match.ball.possessionPlayerId;
@@ -384,8 +409,7 @@ export class MatchActionService {
           );
 
           if (saved) {
-            MatchStatisticsService.recordSave(match, team.id, goalkeeper.id);
-            this.pendingShots.delete(match.id);
+            this.recordGoalkeeperSave(match, team.id, goalkeeper.id);
           }
         }
       }
@@ -418,8 +442,7 @@ export class MatchActionService {
     );
 
     if (saved) {
-      MatchStatisticsService.recordSave(match, team.id, goalkeeper.id);
-      this.pendingShots.delete(match.id);
+      this.recordGoalkeeperSave(match, team.id, goalkeeper.id);
     }
   }
 
@@ -734,9 +757,8 @@ export class MatchActionService {
           match.ball,
         );
 
-        if (match.ball.possessionPlayerId === player.id) {
-          MatchStatisticsService.recordInterception(match, team.id, player.id);
-        }
+        // Interceptions are recorded in resolvePendingPass, and only when the
+        // ball was an opponent's pass.
         return;
       }
 
@@ -789,6 +811,7 @@ export class MatchActionService {
 
       case "TACKLE":
       case "HARD_TACKLE":
+        debugLog(`DEF ${player.id} action=${decision.action} rank=${context.formation?.ballRank}`);
         this.executeTackle(match, team.id, player, state, context, decision);
         return;
     }
@@ -954,9 +977,24 @@ export class MatchActionService {
         predictedShot?.isOnTarget ?? false,
       );
 
+      // Only credit an assist if the shooter actually received the last
+      // completed pass, from a teammate, within the assist window.
+      const lastPass = this.lastCompletedPasses.get(match.id);
+
+      const assistPlayerId =
+        lastPass !== undefined &&
+        lastPass.teamId === team.id &&
+        lastPass.receiverId === player.id &&
+        lastPass.passerId !== player.id &&
+        match.tick - lastPass.tick <= MatchActionService.ASSIST_WINDOW_TICKS
+          ? lastPass.passerId
+          : null;
+
       this.pendingShots.set(match.id, {
         shooterId: player.id,
         teamId: team.id,
+        assistPlayerId,
+        tick: match.tick,
       });
     }
   }
@@ -969,24 +1007,24 @@ export class MatchActionService {
     context: DecisionContext,
     decision: DecisionResult,
   ): void {
-    this.cancelRunningAction(player.id, state);
-    const carrierId = decision.targetPlayerId ??
-      context.ball.possessionPlayerId;
+    debugLog(`TACKLE reached: ${player.id} ${decision.action} target=${decision.targetPlayerId}`);
+    const carrierId = decision.targetPlayerId ?? context.ball.possessionPlayerId;
     const carrier = context.opponents.find(
       (opponent) => opponent.player.id === carrierId,
     );
     if (!carrier) return;
-
-    const distance = PitchService.getDistance(
-      state.position,
-      carrier.state.position,
-    );
-    if (distance > 3) return;
+    const distance = PitchService.getDistance(state.position, carrier.state.position);
+    if (distance > 3) {
+      state.targetPosition = { ...carrier.state.position };
+      state.isMoving = true;
+      state.currentAction = "PRESSING";
+      return;
+    }
+    this.cancelRunningAction(player.id, state); // only once we're really tackling
 
     // Tackler on cooldown, or carrier just won the ball: keep closing the
     // carrier down instead of tackling (or standing still).
-    const onCooldown =
-      (this.tackleCooldowns.get(player.id) ?? 0) > match.tick;
+    const onCooldown = (this.tackleCooldowns.get(player.id) ?? 0) > match.tick;
     if (onCooldown || this.isShielded(match, carrier.player.id)) {
       state.targetPosition = { ...carrier.state.position };
       state.isMoving = true;
@@ -1051,18 +1089,29 @@ export class MatchActionService {
 
     const receiverTeamId = this.getPlayerTeamId(match, receiverId);
 
-    const isTeammate = receiverTeamId === pending.teamId;
-    const isIntendedReceiver =
-      pending.receiverId === null || pending.receiverId === receiverId;
-
-    // Completed only if the intended receiver (or any teammate, when the pass
-    // had no specific target) gets it. Anything else is a failed pass.
-    if (isTeammate && isIntendedReceiver) {
+    if (receiverTeamId === pending.teamId) {
+      // Reaching ANY teammate is a completed pass, not just the one the
+      // passer was aiming at.
       MatchStatisticsService.completePass(
         match,
         pending.teamId,
         pending.passerId,
       );
+
+      this.lastCompletedPasses.set(match.id, {
+        passerId: pending.passerId,
+        receiverId,
+        teamId: pending.teamId,
+        tick: match.tick,
+      });
+    } else {
+      // Intercepted by an opponent.
+      MatchStatisticsService.recordInterception(
+        match,
+        receiverTeamId,
+        receiverId,
+      );
+      this.lastCompletedPasses.delete(match.id);
     }
 
     this.pendingPasses.delete(match.id);
@@ -1093,6 +1142,25 @@ export class MatchActionService {
     return undefined;
   }
 
+  // A save only counts when it stops a recent shot by the other team.
+  // Catching a pass, a loose ball or a cross is not a save.
+  private recordGoalkeeperSave(
+    match: MatchState,
+    teamId: string,
+    goalkeeperId: string,
+  ): void {
+    const shot = this.pendingShots.get(match.id);
+
+    if (
+      shot !== undefined &&
+      shot.teamId !== teamId &&
+      match.tick - shot.tick <= MatchActionService.SHOT_WINDOW_TICKS
+    ) {
+      MatchStatisticsService.recordSave(match, teamId, goalkeeperId);
+      this.pendingShots.delete(match.id);
+    }
+  }
+
   private isWithinSaveContact(
     state: PlayerMatchState,
     match: MatchState,
@@ -1106,6 +1174,14 @@ export class MatchActionService {
     previousHeight: number,
   ): void {
     const currentPosition = match.ball.position;
+
+    // A ball held by a player cannot score. Without this, picking the ball
+    // up next to the goal line moves it across the line and counts a goal
+    // that no shot produced.
+    if (match.ball.possessionPlayerId !== null) {
+      match.ball.position = PitchService.clampPosition(currentPosition);
+      return;
+    }
 
     const crossedRight =
       previousPosition.x < PITCH_DIMENSIONS.length &&
@@ -1156,23 +1232,42 @@ export class MatchActionService {
             ? match.homeTeamState
             : match.awayTeamState;
 
-        scoringTeamState.score++;
         const scoringTeamId =
           scoringTeamState === match.homeTeamState
             ? match.homeTeam.id
             : match.awayTeam.id;
 
+        // Only a recent shot by the scoring team earns a scorer and assist.
         const pendingShot = this.pendingShots.get(match.id);
-        const scorerId =
-          pendingShot?.teamId === scoringTeamId
-            ? pendingShot.shooterId
+        const liveShot =
+          pendingShot !== undefined &&
+          pendingShot.teamId === scoringTeamId &&
+          match.tick - pendingShot.tick <= MatchActionService.SHOT_WINDOW_TICKS
+            ? pendingShot
             : undefined;
 
-        MatchStatisticsService.recordGoal(match, scoringTeamId, scorerId);
-        this.pendingShots.delete(match.id);
-        this.pendingPasses.delete(match.id);
-        this.resetBall(match);
-        return;
+        if (liveShot || MatchActionService.ALLOW_NON_SHOT_GOALS) {
+          scoringTeamState.score++;
+
+          MatchStatisticsService.recordGoal(
+            match,
+            scoringTeamId,
+            liveShot?.shooterId,
+          );
+
+          if (liveShot?.assistPlayerId) {
+            MatchStatisticsService.recordAssist(match, liveShot.assistPlayerId);
+          }
+
+          this.pendingShots.delete(match.id);
+          this.pendingPasses.delete(match.id);
+          this.lastCompletedPasses.delete(match.id);
+          this.resetBall(match);
+          return;
+        }
+
+        // Not from a shot: no goal. Falls through and is handled as a dead
+        // ball below.
       }
     }
 
@@ -1183,6 +1278,9 @@ export class MatchActionService {
       currentPosition.y > PITCH_DIMENSIONS.width;
 
     if (outsidePitch) {
+      this.pendingPasses.delete(match.id);
+      this.lastCompletedPasses.delete(match.id);
+
       match.ball.position = PitchService.clampPosition(currentPosition);
       match.ball.velocity = { x: 0, y: 0 };
       match.ball.verticalVelocity = 0;

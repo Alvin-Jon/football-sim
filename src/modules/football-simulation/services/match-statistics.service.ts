@@ -127,6 +127,17 @@ export class MatchStatisticsService {
     }
   }
 
+  static recordAssist(
+    match: MatchState,
+    assisterId: string,
+  ): void {
+    const player = match.statistics.players[assisterId];
+
+    if (player) {
+      player.assists++;
+    }
+  }
+
   static recordSave(
     match: MatchState,
     teamId: string,

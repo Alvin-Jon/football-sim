@@ -3,33 +3,82 @@ import { MatchInitializationService } from "../modules/football-simulation/servi
 import { MatchEngineService } from "../modules/football-simulation/services/match-engine.service.js";
 import { MatchTUI } from "../tui/match-tui.js";
 import { BAYVIEW, MANFIELD } from "../db/teams/index.js";
+
+type Match = ReturnType<typeof MatchInitializationService.initialize>;
+
+// Engine steps per game second. Leave this alone: changing it alters the
+// physics and every constant that is counted in ticks.
 const TICK_RATE = 20;
 const HALF_DURATION = 45 * 60;
 
+// Screen redraws per real second. THIS is the FPS control.
+// Playback speed is separate: use the [+] / [-] keys while the match runs.
+const FPS = 30;
+const FRAME_MS = 1000 / FPS;
+
+// Most of a frame that may be spent simulating, so the UI stays responsive
+// even at high playback speeds.
+const SIM_BUDGET_MS = FRAME_MS * 0.8;
+
 const engine = new MatchEngineService(TICK_RATE);
 
-
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 async function runHalf(
-  match: ReturnType<typeof MatchInitializationService.initialize>,
+  match: Match,
   half: 1 | 2,
   tui: MatchTUI,
-) {
+): Promise<Match> {
   const targetElapsedSeconds = half * HALF_DURATION;
 
+  // Fractional ticks carried between frames so any speed/FPS combination
+  // stays accurate.
+  let carry = 0;
+  let last = performance.now();
+
   while (match.clock.elapsedSeconds < targetElapsedSeconds) {
-    match = engine.tick(match);
+    const frameStart = performance.now();
 
-    // Update the terminal interface.
-    tui.update(match);
-
-    // Yield periodically so Blessed can process keyboard events.
-    if (match.tick % 5 === 0) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
+    // Paused: do not advance the engine, just keep the UI alive.
+    if (tui.isPaused()) {
+      last = frameStart;
+      tui.render();
+      await sleep(50);
+      continue;
     }
-  }
 
-  tui.update(match);
+    // Clamp so a stall (terminal resize, debugger) does not cause a burst.
+    const elapsedReal = Math.min((frameStart - last) / 1000, 0.25);
+    last = frameStart;
+
+    carry += elapsedReal * tui.getSpeed() * TICK_RATE;
+    const wanted = Math.floor(carry);
+
+    let done = 0;
+    while (
+      done < wanted &&
+      match.clock.elapsedSeconds < targetElapsedSeconds
+    ) {
+      match = engine.tick(match);
+      done++;
+
+      // Stop simulating if this frame is taking too long.
+      if ((done & 15) === 0 && performance.now() - frameStart > SIM_BUDGET_MS) {
+        break;
+      }
+    }
+
+    // If the budget cut the frame short, drop the backlog instead of
+    // falling further and further behind.
+    carry = done < wanted ? 0 : carry - done;
+
+    // One cheap state update and one render per FRAME, not per tick.
+    tui.update(match);
+    tui.render();
+
+    await sleep(Math.max(0, FRAME_MS - (performance.now() - frameStart)));
+  }
 
   return match;
 }
@@ -38,37 +87,26 @@ async function simulateMatch() {
   const tui = new MatchTUI();
 
   try {
-    // Generate teams.
     const homeTeam = BAYVIEW;
     const awayTeam = MANFIELD;
 
-    // Initialize match.
     let match = MatchInitializationService.initialize(
       "test-match-001",
       homeTeam,
       awayTeam,
     );
 
-    // Validate teams.
     assert.equal(homeTeam.players.length, 11);
     assert.equal(awayTeam.players.length, 11);
 
-    assert.equal(
-      Object.keys(match.homeTeamState.playerStates).length,
-      11,
-    );
+    assert.equal(Object.keys(match.homeTeamState.playerStates).length, 11);
+    assert.equal(Object.keys(match.awayTeamState.playerStates).length, 11);
 
-    assert.equal(
-      Object.keys(match.awayTeamState.playerStates).length,
-      11,
-    );
-
-    // Start match.
     match = engine.start(match);
-
-    tui.update(match)
-
     assert.equal(match.status, "IN_PROGRESS");
+
+    tui.update(match);
+    tui.render();
 
     // FIRST HALF
     match = await runHalf(match, 1, tui);
@@ -78,17 +116,16 @@ async function simulateMatch() {
 
     // HALF TIME
     match = engine.finishFirstHalf(match);
-
     assert.equal(match.status, "HALF_TIME");
 
     tui.update(match);
+    tui.render();
 
     // SECOND HALF
     match = engine.startSecondHalf(match);
 
     assert.equal(match.status, "IN_PROGRESS");
     assert.equal(match.clock.half, 2);
-
     assert.equal(match.homeDirection, "RIGHT_TO_LEFT");
     assert.equal(match.awayDirection, "LEFT_TO_RIGHT");
 
@@ -99,12 +136,10 @@ async function simulateMatch() {
 
     // FULL TIME
     match = engine.finishMatch(match);
-
     assert.equal(match.status, "FINISHED");
 
-    // Display final match state.
     tui.update(match);
-
+    tui.render();
   } catch (error) {
     tui.destroy();
     throw error;
@@ -115,7 +150,3 @@ simulateMatch().catch((error: unknown) => {
   console.error("Match simulation failed:", error);
   process.exitCode = 1;
 });
-function generateTeam(arg0: string, arg1: string) {
-  throw new Error("Function not implemented.");
-}
-

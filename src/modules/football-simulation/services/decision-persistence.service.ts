@@ -64,6 +64,20 @@ export class DecisionPersistenceService {
       return true;
     }
 
+    // A defender who has closed to tackle range should re-evaluate immediately.
+    if (context.phase === "DEFENDING" && decision.action !== "TACKLE" && decision.action !== "HARD_TACKLE") {
+      const carrier = context.opponents.find(
+        (o) => o.player.id === context.ball.possessionPlayerId,
+      );
+      if (carrier) {
+        const d = Math.hypot(
+          context.player.state.position.x - carrier.state.position.x,
+          context.player.state.position.y - carrier.state.position.y,
+        );
+        if (d <= 3) return true;
+      }
+    }
+
     // Player's team phase has changed.
     const previousWasAttacking =
       this.isOnBallAction(decision.action);

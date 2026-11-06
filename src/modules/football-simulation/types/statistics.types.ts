@@ -23,6 +23,7 @@ export interface PlayerMatchStatistics {
   shots: number;
   shotsOnTarget: number;
   goals: number;
+  assists:number;
 
   tacklesAttempted: number;
   tacklesWon: number;
@@ -66,6 +67,7 @@ export function createPlayerStatistics(): PlayerMatchStatistics {
     shots: 0,
     shotsOnTarget: 0,
     goals: 0,
+    assists:0,
 
     tacklesAttempted: 0,
     tacklesWon: 0,

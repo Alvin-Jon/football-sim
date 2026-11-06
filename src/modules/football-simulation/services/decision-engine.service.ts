@@ -7,6 +7,7 @@ import type {
 import { DecisionEvaluationService } from "./decision-evaluation.service.js";
 import { DecisionPositionService } from "./decision-position.service.js";
 import { PassingEvaluationService } from "./passing-evaluation.service.js";
+import { debugLog } from "../../../utils/debug-log.js";
 import { PitchService } from "./pitch.service.js";
 import { MovementEvaluationService } from "./movement-evaluation.service.js";
 import { PositioningService } from "./positioning.service.js";
@@ -192,7 +193,7 @@ export class DecisionEngineService {
           });
         }
 
-        if (ballCarrier && distance <= 3) {
+        if (ballCarrier && distance <= 3 && (!formation || formation.ballRank === 0)) {
           candidates.push({
             action: "TACKLE",
             score: 0,

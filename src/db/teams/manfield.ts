@@ -24,7 +24,7 @@ const MANFIELD_PLAYERS: Player[] = [
   PLAYERS.Rodrigo,
 ];
 
-const formation = FORMATION_343;
+const formation = FORMATION_4231_DM;
 
 const players: Player[] = MANFIELD_PLAYERS.map((player, index) => {
   const slot = formation.slots[index];
@@ -49,7 +49,7 @@ export const MANFIELD: Team = {
   tactics: {
     style: "POSSESSION",
     mentality: "BALANCED",
-    formationFluidity: "RIGID",
+    formationFluidity: "FLUID",
   },
 
   players,
