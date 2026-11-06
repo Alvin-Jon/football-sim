@@ -2,6 +2,7 @@ import type {
   GoalkeeperContext,
   GoalkeeperDecision,
 } from "../types/goalkeeper.types.js";
+import type { Vector2D } from "../types/pitch.types.js";
 
 import { GOALKEEPER_CONSTANTS } from "../constants/goalkeeper.constants.js";
 
@@ -88,30 +89,34 @@ export class GoalkeeperDecisionService {
       });
     }
 
-    // Assess an approaching attacker.
-    const nearestOpponent = this.getNearestOpponent(context);
+    // Rush out only at an attacker who has the ball and is bearing down on
+    // goal. Previously ANY attacker near the box triggered a rush, which
+    // dragged the keeper away from his goal.
+    const carrier = context.opponents.find(
+      (opponent) => opponent.playerId === ball.possessionPlayerId,
+    );
 
-    if (nearestOpponent) {
+    if (carrier) {
       const distance = PitchService.getDistance(
         goalkeeper.position,
-        nearestOpponent.position,
+        carrier.position,
       );
 
       const distanceToGoal = PitchService.getDistance(
-        nearestOpponent.position,
+        carrier.position,
         context.goalPosition,
       );
 
       if (
         distance < GOALKEEPER_CONSTANTS.MAX_RUSH_DISTANCE &&
-        distanceToGoal < GOALKEEPER_CONSTANTS.MAX_RUSH_DISTANCE &&
+        distanceToGoal < GOALKEEPER_CONSTANTS.RUSH_ZONE_DISTANCE &&
         goalkeeper.attributes.oneOnOnes >= 8
       ) {
-        reasoning.push("Attacker approaching the goalkeeper.");
+        reasoning.push("Attacker with the ball approaching the goalkeeper.");
 
         return baseDecision("RUSH_OUT", {
-          targetPosition: nearestOpponent.position,
-          targetPlayerId: nearestOpponent.playerId,
+          targetPosition: this.limitFromGoal(carrier.position, context),
+          targetPlayerId: carrier.playerId,
         });
       }
     }
@@ -164,23 +169,24 @@ export class GoalkeeperDecisionService {
     return baseDecision("HOLD_POSITION");
   }
 
-  private getNearestOpponent(context: GoalkeeperContext) {
-    if (context.opponents.length === 0) {
-      return null;
-    }
+  // Keeps a rush target within MAX_RUSH_FROM_GOAL of the goal.
+  private limitFromGoal(
+    position: Vector2D,
+    context: GoalkeeperContext,
+  ): Vector2D {
+    const goal = context.goalPosition;
+    const dx = position.x - goal.x;
+    const dy = position.y - goal.y;
+    const distance = Math.hypot(dx, dy);
+    const max = GOALKEEPER_CONSTANTS.MAX_RUSH_FROM_GOAL;
 
-    return context.opponents.reduce((nearest, current) => {
-      const nearestDistance = PitchService.getDistance(
-        context.goalkeeper.position,
-        nearest.position,
-      );
+    if (distance <= max) return position;
 
-      const currentDistance = PitchService.getDistance(
-        context.goalkeeper.position,
-        current.position,
-      );
-
-      return currentDistance < nearestDistance ? current : nearest;
-    });
+    const ratio = max / distance;
+ 
+    return {
+      x: goal.x + dx * ratio,
+      y: goal.y + dy * ratio,
+    };
   }
 }

@@ -7,12 +7,13 @@ import type {
 import { DecisionEvaluationService } from "./decision-evaluation.service.js";
 import { DecisionPositionService } from "./decision-position.service.js";
 import { PassingEvaluationService } from "./passing-evaluation.service.js";
-import { debugLog } from "../../../utils/debug-log.js";
 import { PitchService } from "./pitch.service.js";
 import { MovementEvaluationService } from "./movement-evaluation.service.js";
 import { PositioningService } from "./positioning.service.js";
 import { DefensiveEvaluationService } from "./defensive-evaluation.service.js";
 import { DecisionPersistenceService } from "./decision-persistence.service.js";
+import { DribbleEvaluationService } from "./dribble-evaluation.service.js";
+import { ShootingEvaluationService } from "./shooting-evaluation.service.js";
 
 import type { FormationSlot } from "../types/formation.types.js";
 import type { FormationFluidity } from "../types/formation.types.js";
@@ -37,6 +38,8 @@ export class DecisionEngineService {
   private readonly movementEvaluationService = new MovementEvaluationService();
   private readonly defensiveEvaluationService = new DefensiveEvaluationService();
   private readonly persistenceService = new DecisionPersistenceService();
+  private readonly dribbleEvaluationService = new DribbleEvaluationService();
+  private readonly shootingEvaluationService = new ShootingEvaluationService();
 
   private generateOnBallActions(
     context: DecisionContext,
@@ -59,21 +62,28 @@ export class DecisionEngineService {
       reasoning: ["Player has possession"],
     });
 
-    // Dribbling
-    const dribbleTarget = PitchService.clampPosition(
-      this.positionService.getForwardPosition(
-        playerPosition,
-        10,
-        context.attackingDirection,
-      ),
+    // Dribbling: straight ahead, or diagonally towards space on either side.
+    const attackSign = this.positionService.getAttackSign(
+      context.attackingDirection,
     );
 
-    candidates.push({
-      action: "DRIBBLE",
-      score: 0,
-      targetPosition: dribbleTarget,
-      reasoning: ["Progress with the ball"],
-    });
+    const dribbleOptions = [
+      { forward: 10, lateral: 0, reasoning: "Run at goal with the ball" },
+      { forward: 8, lateral: -7, reasoning: "Carry the ball into space on one side" },
+      { forward: 8, lateral: 7, reasoning: "Carry the ball into space on the other side" },
+    ];
+
+    for (const option of dribbleOptions) {
+      candidates.push({
+        action: "DRIBBLE",
+        score: 0,
+        targetPosition: PitchService.clampPosition({
+          x: playerPosition.x + attackSign * option.forward,
+          y: playerPosition.y + option.lateral,
+        }),
+        reasoning: [option.reasoning],
+      });
+    }
 
     // Crossing
     if (distanceToGoal < 35) {
@@ -176,24 +186,30 @@ export class DecisionEngineService {
     const defensiveTarget = ballCarrier ?? nearestOpponent;
 
     if (context.phase === "DEFENDING") {
-      if (defensiveTarget) {
-        const distance = PitchService.getDistance(
-          playerPosition,
-          defensiveTarget.state.position,
-        );
+      const carrierDistance = defensiveTarget
+        ? PitchService.getDistance(
+            playerPosition,
+            defensiveTarget.state.position,
+          )
+        : Infinity;
 
-        // Press only if you are a designated chaser or already close.
-        if (isChaser || distance <= 6) {
-          candidates.push({
-            action: "PRESS",
-            score: 0,
-            targetPosition: defensiveTarget.state.position,
-            targetPlayerId: defensiveTarget.player.id,
-            reasoning: ["Apply pressure to the opposition"],
-          });
-        }
+      // Designated chasers and anyone close to the carrier ENGAGE the ball.
+      // Engaged players only press or tackle: holding shape or marking must
+      // never outscore a tackle for a player standing next to the carrier.
+      const engaged =
+        defensiveTarget !== undefined &&
+        (isChaser || carrierDistance <= 6);
 
-        if (ballCarrier && distance <= 3 && (!formation || formation.ballRank === 0)) {
+      if (engaged && defensiveTarget) {
+        candidates.push({
+          action: "PRESS",
+          score: 0,
+          targetPosition: defensiveTarget.state.position,
+          targetPlayerId: defensiveTarget.player.id,
+          reasoning: ["Apply pressure to the opposition"],
+        });
+
+        if (ballCarrier && carrierDistance <= 3) {
           candidates.push({
             action: "TACKLE",
             score: 0,
@@ -210,33 +226,51 @@ export class DecisionEngineService {
             reasoning: ["Attempt an aggressive tackle"],
           });
         }
-      }
+      } else {
+        // Zonal marking: the nearest opponent who is NOT the ball carrier,
+        // and only if they are inside this player's zone.
+        let markTarget: DecisionContext["opponents"][number] | undefined;
+        let markDistance = Infinity;
 
-      // Zonal marking: only mark opponents inside your own zone.
-      if (
-        nearestOpponent &&
-        (!formation ||
-          PitchService.getDistance(
-            nearestOpponent.state.position,
-            formation.shapePosition,
-          ) <= formation.roamRadius)
-      ) {
+        for (const opponent of context.opponents) {
+          if (opponent.player.id === ballCarrier?.player.id) continue;
+
+          const distance = PitchService.getDistance(
+            playerPosition,
+            opponent.state.position,
+          );
+
+          if (distance < markDistance) {
+            markDistance = distance;
+            markTarget = opponent;
+          }
+        }
+
+        if (
+          markTarget &&
+          (!formation ||
+            PitchService.getDistance(
+              markTarget.state.position,
+              formation.shapePosition,
+            ) <= formation.roamRadius)
+        ) {
+          candidates.push({
+            action: "MARK",
+            score: 0,
+            targetPosition: markTarget.state.position,
+            targetPlayerId: markTarget.player.id,
+            reasoning: ["Opponent available to mark"],
+          });
+        }
+
+        // Recover to the defensive shape (NOT to the ball).
         candidates.push({
-          action: "MARK",
+          action: "TRACK_BACK",
           score: 0,
-          targetPosition: nearestOpponent.state.position,
-          targetPlayerId: nearestOpponent.player.id,
-          reasoning: ["Opponent available to mark"],
+          targetPosition: formation?.shapePosition ?? context.ball.position,
+          reasoning: ["Recover to defensive shape"],
         });
       }
-
-      // Recover to the defensive shape (NOT to the ball).
-      candidates.push({
-        action: "TRACK_BACK",
-        score: 0,
-        targetPosition: formation?.shapePosition ?? context.ball.position,
-        reasoning: ["Recover to defensive shape"],
-      });
     } else if (context.phase === "ATTACKING") {
       candidates = this.movementEvaluationService.generateCandidates(context);
 
@@ -289,6 +323,40 @@ export class DecisionEngineService {
     return candidates;
   }
 
+  // A carrier who is not under pressure has no need to give the ball away,
+  // so passing is discounted unless a defender is close. This lets carrying
+  // the ball compete with passing; under pressure, passes are unchanged.
+  private evaluateTempoBias(
+    context: DecisionContext,
+    candidate: DecisionCandidate,
+  ): number {
+    if (
+      candidate.action !== "PASS" &&
+      candidate.action !== "THROUGH_BALL" &&
+      candidate.action !== "LONG_BALL"
+    ) {
+      return 0;
+    }
+
+    let nearest = Infinity;
+
+    for (const opponent of context.opponents) {
+      nearest = Math.min(
+        nearest,
+        PitchService.getDistance(
+          context.player.state.position,
+          opponent.state.position,
+        ),
+      );
+    }
+
+    if (nearest >= 6) return -32;
+    if (nearest >= 4) return -20;
+    if (nearest >= 2.5) return -8;
+
+    return 0;
+  }
+
   // Rewards targets near the player's shape position and penalises targets
   // outside their roam radius, so the formation is respected.
   private evaluateShapeAdherence(
@@ -324,9 +392,13 @@ export class DecisionEngineService {
 
     const sigma = roam * 0.6;
 
+    // Marking is about the opponent, not the shape: only penalise it when it
+    // drags the player out of position, never reward it.
     let score =
-      DecisionEngineService.SHAPE_BONUS *
-      Math.exp(-0.5 * (distance / sigma) ** 2);
+      candidate.action === "MARK"
+        ? 0
+        : DecisionEngineService.SHAPE_BONUS *
+          Math.exp(-0.5 * (distance / sigma) ** 2);
 
     if (distance > roam) {
       score -=
@@ -402,6 +474,18 @@ export class DecisionEngineService {
           candidate,
         );
 
+        const dribbleScore = this.dribbleEvaluationService.evaluate(
+          context,
+          candidate,
+        );
+
+        const tempoBias = this.evaluateTempoBias(context, candidate);
+
+        const shootScore = this.shootingEvaluationService.evaluate(
+          context,
+          candidate,
+        );
+
         return {
           ...candidate,
           score:
@@ -409,7 +493,10 @@ export class DecisionEngineService {
             passingScore +
             movementScore +
             defensiveScore +
-            shapeScore,
+            shapeScore +
+            dribbleScore +
+            tempoBias +
+            shootScore,
         };
       },
     );

@@ -4,9 +4,12 @@ import type {
   DecisionContext,
 } from "../types/decision.types.js";
 
+import { DecisionPositionService } from "./decision-position.service.js";
 import { PlayerTraitService } from "./player-traits.service.js";
 
 export class DecisionEvaluationService {
+  private static readonly positionService = new DecisionPositionService();
+
   private static distance(
     a: { x: number; y: number },
     b: { x: number; y: number },
@@ -64,19 +67,19 @@ export class DecisionEvaluationService {
           attributes.aggression * 0.3
         );
 
-        case "TACKLE":
-          return (
-            attributes.tackling * 0.5 +
-            attributes.anticipation * 0.3 +
-            attributes.decisions * 0.2
-          );
+      case "TACKLE":
+        return (
+          attributes.tackling * 0.5 +
+          attributes.anticipation * 0.3 +
+          attributes.decisions * 0.2
+        );
 
-        case "HARD_TACKLE":
-          return (
-            attributes.tackling * 0.4 +
-            attributes.aggression * 0.4 +
-            attributes.strength * 0.2
-          );
+      case "HARD_TACKLE":
+        return (
+          attributes.tackling * 0.4 +
+          attributes.aggression * 0.4 +
+          attributes.strength * 0.2
+        );
 
       case "MAKE_RUN":
       case "SUPPORT":
@@ -152,13 +155,9 @@ export class DecisionEvaluationService {
 
     switch (action) {
       case "SHOOT":
-        return distanceToGoal < 12
-          ? 35
-          : distanceToGoal < 22
-            ? 22
-            : distanceToGoal < 30
-              ? 8
-              : -20;
+        // Scored by chance quality (distance, angle, pressure, blocked lane)
+        // in ShootingEvaluationService.
+        return 0;
 
       case "DRIBBLE":
         return nearestOpponent > 5
@@ -171,10 +170,14 @@ export class DecisionEvaluationService {
         return context.teammates.length > 0 ? 15 : -20;
 
       case "THROUGH_BALL":
+        // "Ahead" depends on which way the team is attacking.
         return context.teammates.some(
           (teammate) =>
-            teammate.state.position.x >
-            playerPosition.x + 5,
+            this.positionService.getForwardDistance(
+              playerPosition,
+              teammate.state.position,
+              context.attackingDirection,
+            ) > 5,
         )
           ? 20
           : -10;

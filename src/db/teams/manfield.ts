@@ -9,6 +9,7 @@ import {
 } from "../../modules/football-simulation/formations/index.js";
 
 import { PLAYERS } from "../players/players.js";
+import { type PlayerAttributes } from "../../modules/football-simulation/types/player.types.js";
 
 const MANFIELD_PLAYERS: Player[] = [
   PLAYERS.Harold_C,
@@ -26,6 +27,16 @@ const MANFIELD_PLAYERS: Player[] = [
 
 const formation = FORMATION_4231_DM;
 
+const debuff = (attributes: PlayerAttributes, multiplier: number): PlayerAttributes => {
+  const result = { ...attributes };
+
+  for (const stat of Object.keys(result) as (keyof PlayerAttributes)[]) {
+    result[stat] = 20;
+  }
+
+  return result;
+};
+
 const players: Player[] = MANFIELD_PLAYERS.map((player, index) => {
   const slot = formation.slots[index];
 
@@ -37,7 +48,9 @@ const players: Player[] = MANFIELD_PLAYERS.map((player, index) => {
 
   return {
     ...player,
+    id: slot.id + (Math.random()*2),
     position: slot.position,
+    //attributes: debuff(player.attributes, 0.9)
   };
 });
 

@@ -15,6 +15,7 @@ export class InterceptionService {
   constructor(
     private readonly ballInteractionService: BallInteractionService,
     private readonly trajectoryService: BallTrajectoryService,
+    private readonly random: () => number
   ) {}
 
   resolveInterception(
@@ -86,6 +87,13 @@ export class InterceptionService {
       currentBallDistance <= INTERCEPTION_CONSTANTS.INTERCEPTION_RADIUS &&
       ball.height <= INTERCEPTION_CONSTANTS.MAX_INTERCEPTION_HEIGHT
     ) {
+      const ballSpeed = Math.hypot(ball.velocity.x, ball.velocity.y);
+      const a = defender.player.attributes;
+      const chance = Math.max(0.05, Math.min(0.85,
+        0.25 + a.anticipation * 0.02 + a.positioning * 0.01 - ballSpeed * 0.015,
+      ));
+
+      if (this.random() <= chance) {
       const intercepted = this.ballInteractionService.tryControl(
         defender.player,
         defender.state,
@@ -101,6 +109,7 @@ export class InterceptionService {
           message: "Ball successfully intercepted.",
         };
       }
+    }
     }
 
     // Otherwise, move towards the predicted interception point.
@@ -148,8 +157,11 @@ export class InterceptionService {
     );
 
     const effectiveMaxSpeed = maxSpeed * staminaMultiplier;
+    const reactionTime = Math.max(0.1, 0.5 - player.attributes.anticipation * 0.02);
 
     for (const sample of samples) {
+      const availableTime = sample.time - reactionTime;
+      if (availableTime <= 0) continue;
       if (
         sample.height >
         INTERCEPTION_CONSTANTS.MAX_INTERCEPTION_HEIGHT
@@ -161,8 +173,6 @@ export class InterceptionService {
         state.position,
         sample.position,
       );
-
-      const availableTime = sample.time;
 
       const reachableDistance = this.getReachableDistance(
         availableTime,

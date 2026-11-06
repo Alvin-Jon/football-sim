@@ -17,7 +17,7 @@ const BAYVIEW_PLAYERS: Player[] = [
     PLAYERS.Lamine_Yamal
 ]
 
-const formation = FORMATION_4231_DM;
+const formation = FORMATION_433;
 
 const players: Player[] = BAYVIEW_PLAYERS.map((player, index) => {
   const slot = formation.slots[index];
@@ -30,6 +30,7 @@ const players: Player[] = BAYVIEW_PLAYERS.map((player, index) => {
 
   return {
     ...player,
+    id: slot.id + (Math.random()*2),    
     position: slot.position,
   };
 });
@@ -38,10 +39,10 @@ export const BAYVIEW: Team = {
     id: "BAYVIEW",
     name: "Bayview Athletic",
     color: "white",
-    formation,
+    formation,   
     tactics: {
-        style: "DIRECT",
-        mentality: "ATTACKING",
+        style: "POSSESSION",
+        mentality: "BALANCED",
         formationFluidity: "FLUID",
     },
     players: players,

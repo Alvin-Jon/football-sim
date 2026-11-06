@@ -61,18 +61,8 @@ export class MatchActionService {
   private static readonly MIN_HOLD_TICKS = 60;
   private static readonly PRESSURE_HOLD_TICKS = 10;
   private static readonly PRESSURE_DISTANCE = 4;
-
-  // A pass only counts as an assist if the shot follows within this window
-  // (200 ticks = 10s at 20 ticks per second).
   private static readonly ASSIST_WINDOW_TICKS = 200;
-
-  // A goal is only credited to a shooter if it follows their shot within this
-  // window. Stops an old, missed shot claiming a later goal.
   private static readonly SHOT_WINDOW_TICKS = 200;
-
-  // When false, a ball only counts as a goal if it came from a recorded
-  // shot. Passes that roll into the net, and back-passes that miss the
-  // keeper, are treated as dead balls instead.
   private static readonly ALLOW_NON_SHOT_GOALS = false;
 
   private readonly random: () => number;
@@ -84,10 +74,7 @@ export class MatchActionService {
   private readonly passing: PassingService;
   private readonly receiving: ReceivingService;
   private readonly shooting: ShootingService;
-  private readonly interception = new InterceptionService(
-    this.ballInteraction,
-    this.trajectory,
-  );
+  private readonly interception:  InterceptionService;
   private readonly goalkeeperPositioning = new GoalkeeperPositioningService();
   private readonly goalkeeperPrediction = new GoalkeeperPredictionService(
     this.trajectory,
@@ -112,6 +99,7 @@ export class MatchActionService {
   private lastHolderId: string | null = null;
   private readonly positionService = new DecisionPositionService();
   private readonly lastCompletedPasses = new Map<string, LastCompletedPass>();
+  private readonly passOutcomes = { set: 0, overwritten: 0 };
 
   constructor(random: () => number = Math.random) {
     this.random = random;
@@ -119,6 +107,7 @@ export class MatchActionService {
     this.receiving = new ReceivingService(this.ballInteraction, random);
     this.shooting = new ShootingService(this.ballInteraction, random);
     this.goalkeeperSave = new GoalkeeperSaveService(random);
+    this.interception = new InterceptionService(this.ballInteraction, this.trajectory, random);
   }
 
   update(match: MatchState, deltaTime: number): MatchState {
@@ -348,6 +337,18 @@ export class MatchActionService {
         this.resolvePendingPass(match, player.id);
       }
     }
+  }
+
+  private setPendingPass(match: MatchState, pass: PendingPass): void {
+      this.passOutcomes.set++;
+      if (this.pendingPasses.has(match.id)) {
+        this.passOutcomes.overwritten++;
+      }
+      this.pendingPasses.set(match.id, pass);
+
+      if (this.passOutcomes.set % 100 === 0) {
+        //debugLog(`passes set=${this.passOutcomes.set} overwritten=${this.passOutcomes.overwritten}`);
+      }
   }
 
   private updateGoalkeeper(
@@ -721,7 +722,7 @@ export class MatchActionService {
     state: PlayerMatchState,
     context: DecisionContext,
     decision: DecisionResult,
-  ): void {
+  ): void {    
     switch (decision.action) {
       case "PRESS":
         this.actionEngine.execute(state, decision, match.tick);
@@ -811,7 +812,7 @@ export class MatchActionService {
 
       case "TACKLE":
       case "HARD_TACKLE":
-        debugLog(`DEF ${player.id} action=${decision.action} rank=${context.formation?.ballRank}`);
+        //debugLog(`DEF ${player.id} action=${decision.action} rank=${context.formation?.ballRank}`);
         this.executeTackle(match, team.id, player, state, context, decision);
         return;
     }
@@ -856,7 +857,7 @@ export class MatchActionService {
     state.currentAction = "PASSING";
 
     MatchStatisticsService.recordPass(match, team.id, player.id);
-    this.pendingPasses.set(match.id, {
+    this.setPendingPass(match, {
       passerId: player.id,
       receiverId: decision.targetPlayerId ?? null,
       teamId: team.id,
@@ -1007,7 +1008,7 @@ export class MatchActionService {
     context: DecisionContext,
     decision: DecisionResult,
   ): void {
-    debugLog(`TACKLE reached: ${player.id} ${decision.action} target=${decision.targetPlayerId}`);
+    //debugLog(`TACKLE reached: ${player.id} ${decision.action} target=${decision.targetPlayerId}`);
     const carrierId = decision.targetPlayerId ?? context.ball.possessionPlayerId;
     const carrier = context.opponents.find(
       (opponent) => opponent.player.id === carrierId,

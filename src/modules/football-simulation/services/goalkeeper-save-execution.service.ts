@@ -74,23 +74,35 @@ export class GoalkeeperSaveExecutionService {
     return true;
   }
 
+  // A parry pushes the ball wide of goal and back into play. It used to go
+  // straight back along the line from the goal, which fed the shooter a
+  // rebound.
   private parryBall(
     context: GoalkeeperContext,
     ball: BallState,
   ): void {
-    const goalToBallDirection = Math.atan2(
-      ball.position.y - context.goalPosition.y,
-      ball.position.x - context.goalPosition.x,
-    );
+    const attackingRight = context.attackingDirection === "LEFT_TO_RIGHT";
 
-    const horizontalSpeed =
-      Math.hypot(ball.velocity.x, ball.velocity.y) *
-      GOALKEEPER_CONSTANTS.PARRY_SPEED_MULTIPLIER;
+    // Out of the goal, towards the pitch.
+    const outward = attackingRight ? 0 : Math.PI;
+
+    // Towards the side the ball came in on.
+    const side = ball.position.y >= context.goalPosition.y ? 1 : -1;
+
+    const direction =
+      outward + side * (attackingRight ? 1 : -1) * 0.95;
+
+    const incomingSpeed = Math.hypot(ball.velocity.x, ball.velocity.y);
+
+    const horizontalSpeed = Math.min(
+      GOALKEEPER_CONSTANTS.PARRY_MAX_SPEED,
+      Math.max(5, incomingSpeed * GOALKEEPER_CONSTANTS.PARRY_SPEED_MULTIPLIER),
+    );
 
     this.ballInteractionService.deflectBall(
       ball,
-      goalToBallDirection,
-      Math.max(5, horizontalSpeed),
+      direction,
+      horizontalSpeed,
       GOALKEEPER_CONSTANTS.PARRY_VERTICAL_SPEED,
     );
   }
@@ -101,8 +113,8 @@ export class GoalkeeperSaveExecutionService {
   ): void {
     const direction =
       context.attackingDirection === "LEFT_TO_RIGHT"
-        ? Math.PI
-        : 0;
+        ? 0
+        : Math.PI;
 
     this.ballInteractionService.deflectBall(
       ball,

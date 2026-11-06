@@ -23,8 +23,12 @@ export class GoalkeeperPositioningService {
       Math.max(1, distanceToGoal * 0.12),
     );
 
+    // The keeper stands IN FRONT of his own goal, towards the pitch. The goal
+    // is at x = 0 when the team attacks left to right, so in front of it is
+    // +x. (This used to subtract, which pushed him off the pitch and clamped
+    // him onto the goal line.)
     const x =
-      goalPosition.x -
+      goalPosition.x +
       attackSign * forwardDistance;
 
     const y = this.calculateLateralPosition(

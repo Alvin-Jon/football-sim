@@ -2,7 +2,7 @@ import type {
   DecisionContext,
   DecisionResult,
 } from "../types/decision.types.js";
-
+import { debugLog } from "../../../utils/debug-log.js";
 import type { DecisionMemory } from "../types/decision-memory.types.js";
 
 export class DecisionPersistenceService {
@@ -46,6 +46,7 @@ export class DecisionPersistenceService {
     }
 
     const decision = calculateDecision();
+    if(context.ball.possessionPlayerId === playerId) debugLog(`inpossession ${playerId} action=${decision.action} rank=${context.formation?.ballRank}`);
 
     this.storeDecision(playerId, decision);
 

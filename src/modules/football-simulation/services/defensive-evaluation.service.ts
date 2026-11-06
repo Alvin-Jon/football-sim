@@ -205,7 +205,7 @@ export class DefensiveEvaluationService {
 
     const attributes = context.player.player.attributes;
 
-    let score = 20; // we should keep adjusting this 
+    let score = 0; // we should keep adjusting this 
 
     score += attributes.tackling * 0.5;
     score += attributes.anticipation * 0.3;

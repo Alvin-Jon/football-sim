@@ -4,6 +4,7 @@ import type {
 } from "../types/goalkeeper.types.js";
 
 import { GOALKEEPER_CONSTANTS } from "../constants/goalkeeper.constants.js";
+import { PITCH_DIMENSIONS } from "../constants/pitch.constants.js";
 
 import type { PredictedShot } from "./goalkeeper-prediction.service.js";
 
@@ -25,6 +26,7 @@ export class GoalkeeperSaveService {
     saveType: GoalkeeperSaveType,
   ): GoalkeeperSaveResult {
     const attributes = context.goalkeeper.attributes;
+    const c = GOALKEEPER_CONSTANTS;
 
     let chance =
       0.25 +
@@ -46,14 +48,36 @@ export class GoalkeeperSaveService {
 
     chance -= shot.timeToGoal * 0.08;
 
+    // Harder to save: further to cover, faster, and nearer the post.
+    const keeper = context.goalkeeper.position;
+    const reach = Math.hypot(
+      keeper.x - shot.crossingPosition.x,
+      keeper.y - shot.crossingPosition.y,
+    );
+    chance -= reach * c.SAVE_DISTANCE_PENALTY;
+
+    const speed = Math.hypot(
+      context.ball.velocity.x,
+      context.ball.velocity.y,
+    );
+    chance -=
+      Math.max(0, speed - c.SAVE_SPEED_THRESHOLD) * c.SAVE_SPEED_PENALTY;
+
+    const halfGoal = PITCH_DIMENSIONS.goalWidth / 2;
+    const offCentre = Math.min(
+      1,
+      Math.abs(shot.crossingPosition.y - context.goalPosition.y) / halfGoal,
+    );
+    chance -= offCentre * c.SAVE_CORNER_PENALTY;
+
     chance *= Math.max(
       0.75,
       context.goalkeeper.stamina / 100,
     );
 
     chance = Math.max(
-      GOALKEEPER_CONSTANTS.MIN_SAVE_CHANCE,
-      Math.min(GOALKEEPER_CONSTANTS.MAX_SAVE_CHANCE, chance),
+      c.MIN_SAVE_CHANCE,
+      Math.min(c.MAX_SAVE_CHANCE, chance),
     );
 
     const successful = this.random() <= chance;

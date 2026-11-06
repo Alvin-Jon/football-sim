@@ -6,18 +6,13 @@ import { BAYVIEW, MANFIELD } from "../db/teams/index.js";
 
 type Match = ReturnType<typeof MatchInitializationService.initialize>;
 
-// Engine steps per game second. Leave this alone: changing it alters the
-// physics and every constant that is counted in ticks.
+
 const TICK_RATE = 20;
 const HALF_DURATION = 45 * 60;
 
-// Screen redraws per real second. THIS is the FPS control.
-// Playback speed is separate: use the [+] / [-] keys while the match runs.
 const FPS = 30;
 const FRAME_MS = 1000 / FPS;
 
-// Most of a frame that may be spent simulating, so the UI stays responsive
-// even at high playback speeds.
 const SIM_BUDGET_MS = FRAME_MS * 0.8;
 
 const engine = new MatchEngineService(TICK_RATE);
@@ -32,8 +27,6 @@ async function runHalf(
 ): Promise<Match> {
   const targetElapsedSeconds = half * HALF_DURATION;
 
-  // Fractional ticks carried between frames so any speed/FPS combination
-  // stays accurate.
   let carry = 0;
   let last = performance.now();
 
@@ -69,8 +62,6 @@ async function runHalf(
       }
     }
 
-    // If the budget cut the frame short, drop the backlog instead of
-    // falling further and further behind.
     carry = done < wanted ? 0 : carry - done;
 
     // One cheap state update and one render per FRAME, not per tick.
