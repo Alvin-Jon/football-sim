@@ -1,4 +1,9 @@
 import type { MatchState } from "../types/match.types.js";
+import type {
+  PassBreakdown,
+  PassKind,
+  PassTypeStats,
+} from "../types/statistics.types.js";
 
 export class MatchStatisticsService {
   static recordPossession(
@@ -20,14 +25,17 @@ export class MatchStatisticsService {
     match: MatchState,
     teamId: string,
     playerId: string,
+    kind: PassKind = "SHORT",
   ): void {
     const team = this.getTeamStatistics(match, teamId);
     const player = match.statistics.players[playerId];
 
     team.passesAttempted++;
+    this.addPass(team, kind, "attempted");
 
     if (player) {
       player.passesAttempted++;
+      this.addPass(player, kind, "attempted");
     }
   }
 
@@ -35,14 +43,17 @@ export class MatchStatisticsService {
     match: MatchState,
     teamId: string,
     playerId: string,
+    kind: PassKind = "SHORT",
   ): void {
     const team = this.getTeamStatistics(match, teamId);
     const player = match.statistics.players[playerId];
 
     team.passesCompleted++;
+    this.addPass(team, kind, "completed");
 
     if (player) {
       player.passesCompleted++;
+      this.addPass(player, kind, "completed");
     }
   }
 
@@ -190,6 +201,22 @@ export class MatchStatisticsService {
         match.statistics.away.passesCompleted,
       ),
     };
+  }
+
+  // Attempts and completions for one pass type, for a team or a player.
+  static getPassTypeStats(
+    stats: { passBreakdown: PassBreakdown },
+    kind: PassKind,
+  ): PassTypeStats {
+    return stats.passBreakdown[kind];
+  }
+
+  private static addPass(
+    holder: { passBreakdown: PassBreakdown },
+    kind: PassKind,
+    field: "attempted" | "completed",
+  ): void {
+    holder.passBreakdown[kind][field]++;
   }
 
   private static getTeamStatistics(

@@ -84,10 +84,10 @@ export class PositionInfluenceService {
     // Finish moves rather than build them: shoot, run in behind, and stay
     // forward instead of dropping to the ball.
     STRIKER: {
-      PASS: -18,
+      PASS: -38,
       THROUGH_BALL: -10,
       LONG_BALL: -16,
-      CROSS: -10,
+      CROSS: -13,
       DRIBBLE: 6,
       SHOOT: 6,
       HOLD_BALL: 4,

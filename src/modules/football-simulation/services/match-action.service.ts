@@ -36,6 +36,7 @@ import { PitchService } from "./pitch.service.js";
 import { ReceivingService } from "./receiving.service.js";
 import { ShootingService } from "./shooting.service.js";
 import { MatchStatisticsService } from "./match-statistics.service.js";
+import type { PassKind } from "../types/statistics.types.js";
 import { FormationPositioningService } from "./formation-positioning.service.js";
 
 interface PendingPass {
@@ -43,6 +44,7 @@ interface PendingPass {
   receiverId: string | null;
   teamId: string;
   tick: number;
+  kind: PassKind;
 }
 
 interface PendingShot {
@@ -74,6 +76,7 @@ export class MatchActionService {
 
   private static readonly PASS_GRACE_TICKS = 6;
   private static readonly PASS_GRACE_RADIUS = 3;
+
   private static readonly ASSIST_WINDOW_TICKS = 200;
   private static readonly SHOT_WINDOW_TICKS = 200;
   private static readonly ALLOW_NON_SHOT_GOALS = false;
@@ -126,9 +129,9 @@ export class MatchActionService {
     this.shooting = new ShootingService(this.ballInteraction, random);
     this.goalkeeperSave = new GoalkeeperSaveService(random);
     this.interception = new InterceptionService(
-          this.ballInteraction,
-          this.trajectory,
-          random,
+        this.ballInteraction,
+        this.trajectory,
+        random
       );
   }
 
@@ -564,12 +567,13 @@ export class MatchActionService {
 
       if (released) {
         this.lockOut(match, goalkeeper.id);
-        MatchStatisticsService.recordPass(match, team.id, goalkeeper.id);
+        MatchStatisticsService.recordPass(match, team.id, goalkeeper.id, "LONG");
         this.pendingPasses.set(match.id, {
           passerId: goalkeeper.id,
           receiverId: null,
           teamId: team.id,
           tick: match.tick,
+          kind: "LONG",
         });
       }
       return;
@@ -595,12 +599,15 @@ export class MatchActionService {
 
     if (result.successful) {
       this.lockOut(match, goalkeeper.id);
-      MatchStatisticsService.recordPass(match, team.id, goalkeeper.id);
+      const keeperKind: PassKind = target.type === "LONG" ? "LONG" : "SHORT";
+
+      MatchStatisticsService.recordPass(match, team.id, goalkeeper.id, keeperKind);
       this.pendingPasses.set(match.id, {
         passerId: goalkeeper.id,
         receiverId: target.targetPlayerId ?? null,
         teamId: team.id,
         tick: match.tick,
+        kind: keeperKind,
       });
     }
   }
@@ -901,12 +908,13 @@ export class MatchActionService {
     this.lockOut(match, player.id);
     state.currentAction = "PASSING";
 
-    MatchStatisticsService.recordPass(match, team.id, player.id);
+    MatchStatisticsService.recordPass(match, team.id, player.id, passType);
     this.pendingPasses.set(match.id, {
       passerId: player.id,
       receiverId: decision.targetPlayerId ?? null,
       teamId: team.id,
       tick: match.tick,
+      kind: passType,
     });
   }
 
@@ -949,12 +957,13 @@ export class MatchActionService {
     if (result.successful) {
       this.lockOut(match, player.id);
       state.currentAction = "PASSING";
-      MatchStatisticsService.recordPass(match, team.id, player.id);
+      MatchStatisticsService.recordPass(match, team.id, player.id, "CROSS");
       this.pendingPasses.set(match.id, {
         passerId: player.id,
         receiverId: receiver?.player.id ?? null,
         teamId: team.id,
         tick: match.tick,
+        kind: "CROSS",
       });
     }
   }
@@ -1210,6 +1219,7 @@ export class MatchActionService {
         match,
         pending.teamId,
         pending.passerId,
+        pending.kind,
       );
 
       this.lastCompletedPasses.set(match.id, {

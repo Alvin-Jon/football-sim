@@ -1,13 +1,11 @@
 import { MatchInitializationService } from "../modules/football-simulation/services/match-initialization.service.js";
 import { MatchEngineService } from "../modules/football-simulation/services/match-engine.service.js";
 import { PositionInfluenceService } from "../modules/football-simulation/services/position-influence.service.js";
+import { MatchStatisticsService } from "../modules/football-simulation/services/match-statistics.service.js";
+import { PASS_KINDS } from "../modules/football-simulation/types/statistics.types.js";
+import type { PassKind } from "../modules/football-simulation/types/statistics.types.js";
 import { BAYVIEW, MANFIELD } from "../db/teams/index.js";
 
-// Usage: tsx src/scripts/simulate-headless.ts [matches] [seed] [swap]
-//   matches  number of full matches to play (default 3)
-//   seed     base random seed (default 1); each match uses seed + index
-//   swap     pass the word "swap" to play MANFIELD at home and BAYVIEW away,
-//            to check whether a lopsided stat follows the team or the side
 const MATCHES = Number(process.argv[2] ?? 3);
 const BASE_SEED = Number(process.argv[3] ?? 1);
 const SWAP = process.argv[4] === "swap";
@@ -37,7 +35,15 @@ interface Totals {
   goals: number;
   tacklesAttempted: number;
   interceptions: number;
+  kinds: Record<PassKind, { attempted: number; completed: number }>;
 }
+
+const emptyKinds = () => ({
+  SHORT: { attempted: 0, completed: 0 },
+  THROUGH: { attempted: 0, completed: 0 },
+  LONG: { attempted: 0, completed: 0 },
+  CROSS: { attempted: 0, completed: 0 },
+});
 
 const empty = (): Totals => ({
   players: 0,
@@ -47,6 +53,7 @@ const empty = (): Totals => ({
   goals: 0,
   tacklesAttempted: 0,
   interceptions: 0,
+  kinds: emptyKinds(),
 });
 
 const byRole = new Map<string, Totals>();
@@ -99,6 +106,12 @@ function collect(match: Match): void {
       totals.tacklesAttempted += stats.tacklesAttempted;
       totals.interceptions += stats.interceptions;
 
+      for (const kind of PASS_KINDS) {
+        const typed = MatchStatisticsService.getPassTypeStats(stats, kind);
+        totals.kinds[kind].attempted += typed.attempted;
+        totals.kinds[kind].completed += typed.completed;
+      }
+
       byRole.set(role, totals);
     }
   }
@@ -146,4 +159,20 @@ console.table(
     "tackles/player": (t.tacklesAttempted / t.players).toFixed(1),
     "int/player": (t.interceptions / t.players).toFixed(1),
   })),
+);
+
+console.log("\nPASSES BY TYPE, PER PLAYER PER MATCH: attempts (completion %)");
+console.table(
+  [...byRole.entries()].map(([role, t]) => {
+    const row: Record<string, string> = { role };
+
+    for (const kind of PASS_KINDS) {
+      const { attempted, completed } = t.kinds[kind];
+      const percent = attempted === 0 ? 0 : Math.round((completed / attempted) * 100);
+
+      row[kind] = `${(attempted / t.players).toFixed(1)} (${percent}%)`;
+    }
+
+    return row;
+  }),
 );
