@@ -46,9 +46,9 @@ export class PositionInfluenceService {
       LONG_BALL: 4,
       CROSS: -10,
       DRIBBLE: -8,
-      SHOOT: -10,
+      SHOOT: -3,
       MAKE_RUN: -6,
-      HOLD_BALL: 15,
+      HOLD_BALL: 16,
     },
 
     // Balanced; the team's main passers and playmakers.
@@ -56,7 +56,6 @@ export class PositionInfluenceService {
       PASS: 4,
       THROUGH_BALL: 6,
       CROSS: -4,
-      SHOOT: -2,
     },
 
     // Creators: through balls, some shooting and carrying.
@@ -65,20 +64,20 @@ export class PositionInfluenceService {
       THROUGH_BALL: 10,
       LONG_BALL: -6,
       DRIBBLE: 6,
-      SHOOT: 6,
+      SHOOT: 2,
       MAKE_RUN: 6,
       SUPPORT: 2,
     },
 
     // Take players on and deliver crosses; seldom recycle the ball.
     WINGER: {
-      PASS: -8,
+      PASS: -13,
       THROUGH_BALL: -4,
       LONG_BALL: -10,
       CROSS: 12,
-      DRIBBLE: 14,
-      SHOOT: 6,
-      MAKE_RUN: 10,
+      DRIBBLE: 15,
+      SHOOT: 2,
+      MAKE_RUN: 12,
       SUPPORT: -4,
     },
 
@@ -90,7 +89,7 @@ export class PositionInfluenceService {
       LONG_BALL: -16,
       CROSS: -10,
       DRIBBLE: 6,
-      SHOOT: 14,
+      SHOOT: 6,
       HOLD_BALL: 4,
       MAKE_RUN: 12,
       SUPPORT: -10,

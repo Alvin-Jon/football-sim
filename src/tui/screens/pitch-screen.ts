@@ -3,6 +3,7 @@ import blessed from "blessed";
 import type { Player } from "../../modules/football-simulation/types/player.types.js";
 import type { FormationSlot } from "../../modules/football-simulation/types/formation.types.js";
 import type { MatchInitializationService } from "../../modules/football-simulation/services/match-initialization.service.js";
+import { PitchService } from "../../modules/football-simulation/index.js";
 
 interface Position {
   x: number;
@@ -47,6 +48,7 @@ export class PitchScreen {
   private renderInterval = 33; // 10 FPS
   private lastRenderTime = 0;
   private renderPending = false;
+  private halfwayLine: blessed.Widgets.BoxElement;
   
 
   constructor(screen: blessed.Widgets.Screen) {
@@ -72,10 +74,24 @@ export class PitchScreen {
       },
     });
 
+    this.halfwayLine = blessed.box({
+      top: 0,
+      left: "50%",
+      width: 1,
+      height: "100%-2",
+      content: "│",
+      style: {
+        fg: "white",
+      },
+    });
+
+    this.pitch.append(this.halfwayLine);
+
     this.screen.append(this.pitch);
-    this.screen.append(this.ballMarker);
+    this.pitch.append(this.ballMarker);
 
     this.drawPitch();
+    this.screen.render();
   }
 
   private requestRender() {
@@ -99,26 +115,14 @@ export class PitchScreen {
   }
 
   private drawPitch() {
-    const width = Number(this.pitch.width) || 80;
-    const height = Number(this.pitch.height) || 24;
+    const height = (this.pitch.height as number) - 2;
 
-    const lines: string[] = [];
+    const lines = Array.from(
+      { length: height },
+      () => "│",
+    );
 
-    for (let y = 0; y < height; y++) {
-      let line = "";
-
-      for (let x = 0; x < width; x++) {
-        if (x === Math.floor(width / 2)) {
-          line += "│";
-        } else {
-          line += " ";
-        }
-      }
-
-      lines.push(line);
-    }
-
-    this.pitch.setContent(lines.join("\n"));
+    this.halfwayLine.setContent(lines.join("\n"));
   }
 
   // Resolves both teams' players into pitch coordinates.
@@ -167,13 +171,15 @@ export class PitchScreen {
     const pitchWidth = Number(this.pitch.width) - 2;
     const pitchHeight = Number(this.pitch.height) - 2;
 
+    const { length, width } = PitchService.getDimensions(); 
+
     for (const player of players) {
       const x = Math.round(
-        (player.position.x / 100) * (pitchWidth - markerWidth),
+        (player.position.x / length) * (pitchWidth - markerWidth),
         );
 
         const y = Math.round(
-        (player.position.y / 68) * (pitchHeight - markerHeight),
+        (player.position.y / width) * (pitchHeight - markerHeight),
         );
       const marker = blessed.box({
         top: y,
@@ -203,12 +209,14 @@ export class PitchScreen {
     const pitchWidth = Number(this.pitch.width) - 2;
     const pitchHeight = Number(this.pitch.height) - 2;
 
+    const { length, width } = PitchService.getDimensions();
+
     this.ballMarker.top = Math.round(
-      (position.y / 68) * pitchHeight,
+      (position.y / width) * pitchHeight,
     );
 
     this.ballMarker.left = Math.round(
-      (position.x / 100) * pitchWidth,
+      (position.x / length) * pitchWidth,
     );
 
     this.requestRender();

@@ -5,7 +5,10 @@ import type {
 } from "../types/decision.types.js";
 import type { Vector2D } from "../types/pitch.types.js";
 import type { FormationSlot } from "../types/formation.types.js";
-import type { GoalkeeperContext } from "../types/goalkeeper.types.js";
+import type {
+  GoalkeeperContext,
+  GoalkeeperSaveType,
+} from "../types/goalkeeper.types.js";
 import type { MatchState, PlayingDirection } from "../types/match.types.js";
 import type { Player } from "../types/player.types.js";
 import type { PlayerMatchState } from "../types/player-state.types.js";
@@ -24,6 +27,7 @@ import { GoalkeeperDecisionService } from "./goalkeeper-decision.service.js";
 import { GoalkeeperDistributionService } from "./goalkeeper-distribution.service.js";
 import { GoalkeeperPositioningService } from "./goalkeeper-positioning.service.js";
 import { GoalkeeperPredictionService } from "./goalkeeper-prediction.service.js";
+import type { PredictedShot } from "./goalkeeper-prediction.service.js";
 import { GoalkeeperSaveExecutionService } from "./goalkeeper-save-execution.service.js";
 import { GoalkeeperSaveService } from "./goalkeeper-save.service.js";
 import { InterceptionService } from "./interception.service.js";
@@ -38,6 +42,7 @@ interface PendingPass {
   passerId: string;
   receiverId: string | null;
   teamId: string;
+  tick: number;
 }
 
 interface PendingShot {
@@ -58,9 +63,17 @@ export class MatchActionService {
   private static readonly RELEASE_LOCKOUT_TICKS = 10;
   private static readonly TACKLE_COOLDOWN_TICKS = 60;
   private static readonly POSSESSION_SHIELD_TICKS = 20;
-  private static readonly MIN_HOLD_TICKS = 60;
+  private static readonly MIN_HOLD_TICKS = 20;
   private static readonly PRESSURE_HOLD_TICKS = 10;
   private static readonly PRESSURE_DISTANCE = 4;
+  private static readonly SHOT_ERROR_BASE = 0.3;
+  private static readonly SHOT_ERROR_PER_METRE = 0.015;
+  private static readonly SHOT_ERROR_UNSKILLED = 0.2;
+  private static readonly SHOT_ERROR_PRESSURE = 0.12;
+  private static readonly SHOT_ERROR_LIMIT = 1.0;
+
+  private static readonly PASS_GRACE_TICKS = 6;
+  private static readonly PASS_GRACE_RADIUS = 3;
   private static readonly ASSIST_WINDOW_TICKS = 200;
   private static readonly SHOT_WINDOW_TICKS = 200;
   private static readonly ALLOW_NON_SHOT_GOALS = false;
@@ -74,7 +87,7 @@ export class MatchActionService {
   private readonly passing: PassingService;
   private readonly receiving: ReceivingService;
   private readonly shooting: ShootingService;
-  private readonly interception:  InterceptionService;
+  private readonly interception : InterceptionService;
   private readonly goalkeeperPositioning = new GoalkeeperPositioningService();
   private readonly goalkeeperPrediction = new GoalkeeperPredictionService(
     this.trajectory,
@@ -99,7 +112,12 @@ export class MatchActionService {
   private lastHolderId: string | null = null;
   private readonly positionService = new DecisionPositionService();
   private readonly lastCompletedPasses = new Map<string, LastCompletedPass>();
-  private readonly passOutcomes = { set: 0, overwritten: 0 };
+
+  // One save roll per shot, remembered per goalkeeper.
+  private readonly saveRolls = new Map<
+    string,
+    { key: string; successful: boolean }
+  >();
 
   constructor(random: () => number = Math.random) {
     this.random = random;
@@ -107,7 +125,11 @@ export class MatchActionService {
     this.receiving = new ReceivingService(this.ballInteraction, random);
     this.shooting = new ShootingService(this.ballInteraction, random);
     this.goalkeeperSave = new GoalkeeperSaveService(random);
-    this.interception = new InterceptionService(this.ballInteraction, this.trajectory, random);
+    this.interception = new InterceptionService(
+          this.ballInteraction,
+          this.trajectory,
+          random,
+      );
   }
 
   update(match: MatchState, deltaTime: number): MatchState {
@@ -234,6 +256,26 @@ export class MatchActionService {
     state.currentAction = "DRIBBLING";
   }
 
+  // True while a pass by the OTHER team has only just left the passer, so
+  // this team's players cannot yet collect it.
+  private isPassProtected(match: MatchState, teamId: string): boolean {
+    const pending = this.pendingPasses.get(match.id);
+
+    if (!pending || pending.teamId === teamId) return false;
+
+    if (match.tick - pending.tick >= MatchActionService.PASS_GRACE_TICKS) {
+      return false;
+    }
+
+    const passer = this.findPlayer(match, pending.passerId);
+    if (!passer) return false;
+
+    return (
+      PitchService.getDistance(passer.state.position, match.ball.position) <
+      MatchActionService.PASS_GRACE_RADIUS
+    );
+  }
+
   private isShielded(match: MatchState, playerId: string): boolean {
     return (this.possessionShields.get(playerId) ?? 0) > match.tick;
   }
@@ -300,7 +342,11 @@ export class MatchActionService {
     const candidates = [
       ...this.getDecisionPlayers(match.homeTeam, match.homeTeamState),
       ...this.getDecisionPlayers(match.awayTeam, match.awayTeamState),
-    ].filter(({ player }) => !this.isLockedOut(match, player.id));
+    ].filter(
+      ({ player }) =>
+        !this.isLockedOut(match, player.id) &&
+        !this.isPassProtected(match, this.getPlayerTeamId(match, player.id)),
+    );
 
     // Evaluate the closest players first, regardless of team.
     candidates.sort(
@@ -337,18 +383,6 @@ export class MatchActionService {
         this.resolvePendingPass(match, player.id);
       }
     }
-  }
-
-  private setPendingPass(match: MatchState, pass: PendingPass): void {
-      this.passOutcomes.set++;
-      if (this.pendingPasses.has(match.id)) {
-        this.passOutcomes.overwritten++;
-      }
-      this.pendingPasses.set(match.id, pass);
-
-      if (this.passOutcomes.set % 100 === 0) {
-        //debugLog(`passes set=${this.passOutcomes.set} overwritten=${this.passOutcomes.overwritten}`);
-      }
   }
 
   private updateGoalkeeper(
@@ -425,12 +459,17 @@ export class MatchActionService {
     );
 
     if (predictedShot?.isOnTarget) {
-      const save = this.goalkeeperSave.evaluateSave(
-        context,
-        predictedShot,
-        decision.saveType,
-      );
-      if (!save.successful) return;
+      if (
+        !this.rollShotSave(
+          match,
+          goalkeeper.id,
+          context,
+          predictedShot,
+          decision.saveType,
+        )
+      ) {
+        return;
+      }
     } else if (decision.saveType !== "PUNCH") {
       return;
     }
@@ -530,6 +569,7 @@ export class MatchActionService {
           passerId: goalkeeper.id,
           receiverId: null,
           teamId: team.id,
+          tick: match.tick,
         });
       }
       return;
@@ -560,6 +600,7 @@ export class MatchActionService {
         passerId: goalkeeper.id,
         receiverId: target.targetPlayerId ?? null,
         teamId: team.id,
+        tick: match.tick,
       });
     }
   }
@@ -722,7 +763,7 @@ export class MatchActionService {
     state: PlayerMatchState,
     context: DecisionContext,
     decision: DecisionResult,
-  ): void {    
+  ): void {
     switch (decision.action) {
       case "PRESS":
         this.actionEngine.execute(state, decision, match.tick);
@@ -749,6 +790,10 @@ export class MatchActionService {
 
         // Don't let the player who just released the ball "intercept" it.
         if (this.isLockedOut(match, player.id)) return;
+
+        // A defender next to the passer cannot snatch a pass that has only
+        // just been played.
+        if (this.isPassProtected(match, team.id)) return;
 
         this.cancelRunningAction(player.id, state);
 
@@ -857,10 +902,11 @@ export class MatchActionService {
     state.currentAction = "PASSING";
 
     MatchStatisticsService.recordPass(match, team.id, player.id);
-    this.setPendingPass(match, {
+    this.pendingPasses.set(match.id, {
       passerId: player.id,
       receiverId: decision.targetPlayerId ?? null,
       teamId: team.id,
+      tick: match.tick,
     });
   }
 
@@ -908,6 +954,7 @@ export class MatchActionService {
         passerId: player.id,
         receiverId: receiver?.player.id ?? null,
         teamId: team.id,
+        tick: match.tick,
       });
     }
   }
@@ -934,6 +981,10 @@ export class MatchActionService {
     if (result.successful) {
       this.lockOut(match, player.id);
       state.currentAction = "SHOOTING";
+
+      // Make the shot imperfect BEFORE it is recorded, so "on target" below
+      // reflects where the ball is really going.
+      this.applyShotInaccuracy(player, state, context, match.ball);
 
       const defendingTeam =
         team.id === match.homeTeam.id ? match.awayTeam : match.homeTeam;
@@ -998,6 +1049,68 @@ export class MatchActionService {
         tick: match.tick,
       });
     }
+  }
+
+  // Rotates the ball's direction by a random aiming error.
+  private applyShotInaccuracy(
+    player: Player,
+    state: PlayerMatchState,
+    context: DecisionContext,
+    ball: MatchState["ball"],
+  ): void {
+    const distance = PitchService.getDistance(
+      state.position,
+      context.goalPosition,
+    );
+
+    const skill = Math.max(
+      0,
+      Math.min(
+        1,
+        (player.attributes.shooting * 0.6 + player.attributes.composure * 0.4) /
+          20,
+      ),
+    );
+
+    // Defenders close to the shooter (the goalkeeper is ignored).
+    let nearest = Infinity;
+    for (const opponent of context.opponents) {
+      if (
+        PitchService.getDistance(opponent.state.position, context.goalPosition) <
+        4
+      ) {
+        continue;
+      }
+
+      nearest = Math.min(
+        nearest,
+        PitchService.getDistance(state.position, opponent.state.position),
+      );
+    }
+
+    const pressure = nearest < 1.5 ? 1 : nearest < 3 ? 0.5 : 0;
+
+    const sigma =
+      MatchActionService.SHOT_ERROR_BASE +
+      MatchActionService.SHOT_ERROR_PER_METRE * distance +
+      MatchActionService.SHOT_ERROR_UNSKILLED * (1 - skill) +
+      MatchActionService.SHOT_ERROR_PRESSURE * pressure;
+
+    // Standard normal random number (Box-Muller).
+    const u1 = Math.max(1e-9, this.random());
+    const u2 = this.random();
+    const gaussian = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+
+    const limit = MatchActionService.SHOT_ERROR_LIMIT;
+    const error = Math.max(-limit, Math.min(limit, gaussian * sigma));
+
+    const cos = Math.cos(error);
+    const sin = Math.sin(error);
+
+    ball.velocity = {
+      x: ball.velocity.x * cos - ball.velocity.y * sin,
+      y: ball.velocity.x * sin + ball.velocity.y * cos,
+    };
   }
 
   private executeTackle(
@@ -1141,6 +1254,37 @@ export class MatchActionService {
       if (player && playerState) return { player, state: playerState };
     }
     return undefined;
+  }
+
+  // The save roll is made ONCE per shot. Rolling every tick while the ball
+  // approaches gave the keeper several attempts at the same shot, so the
+  // result depended on how many ticks the ball took to arrive.
+  private rollShotSave(
+    match: MatchState,
+    goalkeeperId: string,
+    context: GoalkeeperContext,
+    predictedShot: PredictedShot,
+    saveType: GoalkeeperSaveType,
+  ): boolean {
+    const shot = this.pendingShots.get(match.id);
+    const key = shot ? `${shot.shooterId}:${shot.tick}` : null;
+
+    if (key !== null) {
+      const previous = this.saveRolls.get(goalkeeperId);
+      if (previous?.key === key) return previous.successful;
+    }
+
+    const result = this.goalkeeperSave.evaluateSave(
+      context,
+      predictedShot,
+      saveType,
+    );
+
+    if (key !== null) {
+      this.saveRolls.set(goalkeeperId, { key, successful: result.successful });
+    }
+
+    return result.successful;
   }
 
   // A save only counts when it stops a recent shot by the other team.

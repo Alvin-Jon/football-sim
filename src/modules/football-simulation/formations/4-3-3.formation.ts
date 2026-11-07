@@ -8,74 +8,74 @@ export const FORMATION_433: FormationDefinition = {
     {
       id: "GK",
       position: "GK",
-      attackingPosition: { x: 5, y: 34 },
-      defensivePosition: { x: 5, y: 34 },
+      attackingPosition: { x: 5, y: 50 },
+      defensivePosition: { x: 5, y: 50 },
     },
 
     // Defenders
     {
-      id: "LB",
-      position: "LB",
-      attackingPosition: { x: 45, y: 8 },
-      defensivePosition: { x: 22, y: 8 },
-    },
-    {
       id: "LCB",
       position: "CB",
-      attackingPosition: { x: 28, y: 25 },
-      defensivePosition: { x: 17, y: 25 },
+      attackingPosition: { x: 27, y: 37 },
+      defensivePosition: { x: 16, y: 37 },
     },
     {
       id: "RCB",
       position: "CB",
-      attackingPosition: { x: 28, y: 43 },
-      defensivePosition: { x: 17, y: 43 },
+      attackingPosition: { x: 27, y: 63 },
+      defensivePosition: { x: 16, y: 63 },
     },
-    { 
+    {
+      id: "LB",
+      position: "LB",
+      attackingPosition: { x: 43, y: 12 },
+      defensivePosition: { x: 21, y: 12 },
+    },
+    {
       id: "RB",
       position: "RB",
-      attackingPosition: { x: 45, y: 60 },
-      defensivePosition: { x: 22, y: 60 },
+      attackingPosition: { x: 43, y: 88 },
+      defensivePosition: { x: 21, y: 88 },
     },
 
     // Midfielders
     {
       id: "DM",
       position: "DM",
-      attackingPosition: { x: 43, y: 34 },
-      defensivePosition: { x: 29, y: 34 },
+      attackingPosition: { x: 41, y: 50 },
+      defensivePosition: { x: 27, y: 50 },
     },
     {
       id: "LCM",
       position: "CM",
-      attackingPosition: { x: 59, y: 22 },
-      defensivePosition: { x: 43, y: 22 },
+      attackingPosition: { x: 56, y: 32 },
+      defensivePosition: { x: 41, y: 32 },
     },
     {
       id: "RCM",
       position: "CM",
-      attackingPosition: { x: 59, y: 46 },
-      defensivePosition: { x: 43, y: 46 },
+      attackingPosition: { x: 56, y: 68 },
+      defensivePosition: { x: 41, y: 68 },
     },
 
     // Attackers
     {
       id: "LW",
       position: "LW",
-      attackingPosition: { x: 80, y: 8 },
-      defensivePosition: { x: 54, y: 8 },
+      attackingPosition: { x: 77, y: 12 },
+      defensivePosition: { x: 51, y: 12 },
     },
     {
       id: "ST",
       position: "ST",
-      attackingPosition: { x: 87, y: 34 },
-      defensivePosition: { x: 69, y: 34 },
+      attackingPosition: { x: 85, y: 50 },
+      defensivePosition: { x: 67, y: 50 },
     },
     {
       id: "RW",
       position: "RW",
-      attackingPosition: { x: 80, y: 60 },
-      defensivePosition: { x: 54, y: 60 },
+      attackingPosition: { x: 77, y: 88 },
+      defensivePosition: { x: 51, y: 88 },
     },
   ],
 };

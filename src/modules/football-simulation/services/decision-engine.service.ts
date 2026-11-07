@@ -14,7 +14,7 @@ import { DefensiveEvaluationService } from "./defensive-evaluation.service.js";
 import { DecisionPersistenceService } from "./decision-persistence.service.js";
 import { DribbleEvaluationService } from "./dribble-evaluation.service.js";
 import { ShootingEvaluationService } from "./shooting-evaluation.service.js";
-
+import { PositionInfluenceService } from "./position-influence.service.js";
 import type { FormationSlot } from "../types/formation.types.js";
 import type { FormationFluidity } from "../types/formation.types.js";
 
@@ -30,7 +30,7 @@ export class DecisionEngineService {
 
   // Score lost per metre outside the roam radius.
   private static readonly SHAPE_PENALTY_PER_METRE = 3;
-
+  private readonly positionInfluenceService = new PositionInfluenceService();
   private readonly positionService = new DecisionPositionService();
   private readonly evaluationService = new DecisionEvaluationService();
   private readonly pitchService = new PitchService();
@@ -486,6 +486,11 @@ export class DecisionEngineService {
           candidate,
         );
 
+        const positionScore = this.positionInfluenceService.evaluate(
+            context,
+            candidate,
+          );
+
         return {
           ...candidate,
           score:
@@ -496,7 +501,8 @@ export class DecisionEngineService {
             shapeScore +
             dribbleScore +
             tempoBias +
-            shootScore,
+            shootScore +
+            positionScore,
         };
       },
     );

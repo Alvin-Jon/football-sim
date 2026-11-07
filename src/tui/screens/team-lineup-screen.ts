@@ -60,27 +60,27 @@ export class TeamLineupScreen {
   }
 
   private drawPitch() {
-    const width = Number(this.pitch.width) - 2;
-    const height = Number(this.pitch.height) - 2;
+  const width = this.pitch.width as number;
+  const height = this.pitch.height as number;
 
-    const lines: string[] = [];
+  const lines: string[] = [];
 
-    for (let y = 0; y < height; y++) {
-      let line = "";
+  for (let y = 0; y < height - 2; y++) {
+    let line = "";
 
-      for (let x = 0; x < width; x++) {
-        if (x === Math.floor(width / 2)) {
-          line += "│";
-        } else {
-          line += " ";
-        }
+    for (let x = 0; x < width - 2; x++) {
+      if (x === Math.floor((width - 2) / 2)) {
+        line += "│";
+      } else {
+        line += " ";
       }
-
-      lines.push(line);
     }
 
-    this.pitch.setContent(lines.join("\n"));
+    lines.push(line);
   }
+
+  this.pitch.setContent(lines.join("\n"));
+}
 
   private getLineup(
     team: Team,
@@ -139,7 +139,7 @@ export class TeamLineupScreen {
       );
 
       const y = Math.round(
-        (player.coordinates.y / 68) *
+        (player.coordinates.y / 100) *
           (pitchHeight - 1),
       );
 

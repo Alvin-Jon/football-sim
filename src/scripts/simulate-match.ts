@@ -78,8 +78,8 @@ async function simulateMatch() {
   const tui = new MatchTUI();
 
   try {
-    const homeTeam =  MANFIELD;
-    const awayTeam =BAYVIEW ;
+    const homeTeam = BAYVIEW;
+    const awayTeam = MANFIELD;
 
     let match = MatchInitializationService.initialize(
       "test-match-001",

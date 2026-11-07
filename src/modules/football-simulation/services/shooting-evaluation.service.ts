@@ -8,31 +8,39 @@ import { PitchService } from "./pitch.service.js";
 type Point = { x: number; y: number };
 
 export class ShootingEvaluationService {
+  private static readonly MIN_SHOT_QUALITY = 14;
+  private static readonly REJECTED_SHOT_SCORE = -60;
+
   evaluate(context: DecisionContext, candidate: DecisionCandidate): number {
     if (candidate.action !== "SHOOT") return 0;
 
     const from = context.player.state.position;
     const goal = context.goalPosition;
 
-    return (
+    const quality =
       this.evaluateDistance(from, goal) +
       this.evaluateAngle(from, goal) +
       this.evaluatePressure(from, context) +
-      this.evaluateLane(from, goal, context)
-    );
+      this.evaluateLane(from, goal, context);
+
+    if (quality < ShootingEvaluationService.MIN_SHOT_QUALITY) {
+      return ShootingEvaluationService.REJECTED_SHOT_SCORE;
+    }
+
+    return quality;
   }
 
   private evaluateDistance(from: Point, goal: Point): number {
     const distance = PitchService.getDistance(from, goal);
 
-    if (distance <= 6) return 40;
-    if (distance <= 10) return 32;
-    if (distance <= 14) return 22;
-    if (distance <= 18) return 12;
-    if (distance <= 22) return 4;
-    if (distance <= 28) return -6;
+    if (distance <= 5) return 40;
+    if (distance <= 8) return 32;
+    if (distance <= 11) return 20;
+    if (distance <= 14) return 8;
+    if (distance <= 18) return -6;
+    if (distance <= 24) return -22;
 
-    return -25;
+    return -45;
   }
 
   // Wide of the goal means a small target. 0 = straight in front,

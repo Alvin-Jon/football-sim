@@ -1,11 +1,11 @@
 import { PlayerService } from "./player.service.js";
 import { PitchService } from "./pitch.service.js";
-
+import { FormationCoordinatesService } from "./formation-coordinate.service.js";
 import {
   createPlayerStatistics,
   createTeamStatistics,
 } from "../types/statistics.types.js";
-
+const { length, width } = PitchService.getDimensions();
 import type { Team } from "../types/team.types.js";
 import type { TeamMatchState } from "../types/team-state.types.js";
 
@@ -98,8 +98,12 @@ export class MatchInitializationService {
         );
       }
 
-      const position = PitchService.transformPosition(
+      const pitchPosition = FormationCoordinatesService.toPitch(
         slot.defensivePosition,
+      );
+
+      const position = PitchService.transformPosition(
+        pitchPosition,
         direction,
       );
 
@@ -175,7 +179,10 @@ export class MatchInitializationService {
       tick: 0,
 
       ball: {
-        position: { x: 52.5, y: 34 },
+        position: {
+            x: length / 2,
+            y: width / 2,
+        },  
         velocity: { x: 0, y: 0 },
         height: 0,
         verticalVelocity: 0,

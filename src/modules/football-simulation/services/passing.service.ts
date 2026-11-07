@@ -60,6 +60,7 @@ export class PassingService {
     const actualTargetPosition = this.applyPassingError(
       targetPosition,
       accuracy,
+      distance
     );
 
     const direction = Math.atan2(
@@ -139,22 +140,25 @@ export class PassingService {
   }
 
   private applyPassingError(
-    target: Vector2D,
-    accuracy: number,
-  ): Vector2D {
-    const errorStrength =
-      (1 - accuracy) *
-      PASSING_CONSTANTS.MAX_ERROR_DISTANCE;
+  target: Vector2D,
+  accuracy: number,
+  distance: number,
+): Vector2D {
+  const distanceFactor = Math.max(1, distance / 20);
 
-    // Random direction and magnitude.
-    const angle = this.random() * Math.PI * 2;
-    const magnitude = this.random() * errorStrength;
+  const errorStrength =
+    (1 - accuracy) *
+    PASSING_CONSTANTS.MAX_ERROR_DISTANCE *
+    distanceFactor;
 
-    return PitchService.clampPosition({
-      x: target.x + Math.cos(angle) * magnitude,
-      y: target.y + Math.sin(angle) * magnitude,
-    });
-  }
+  const angle = this.random() * Math.PI * 2;
+  const magnitude = this.random() * errorStrength;
+
+  return PitchService.clampPosition({
+    x: target.x + Math.cos(angle) * magnitude,
+    y: target.y + Math.sin(angle) * magnitude,
+  });
+}
 
   // Passes are launched with just enough speed to reach the receiver, rather
   // than at a fixed speed that overshoots short passes.

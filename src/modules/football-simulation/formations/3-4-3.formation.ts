@@ -1,5 +1,4 @@
 import type { FormationDefinition } from "../types/formation.types.js";
-import type { PitchDimensions } from "../types/pitch.types.js";
 
 export const FORMATION_343: FormationDefinition = {
   name: "3-4-3",
@@ -9,76 +8,76 @@ export const FORMATION_343: FormationDefinition = {
     {
       id: "GK",
       position: "GK",
-      attackingPosition: { x: 5, y: 34 },
-      defensivePosition: { x: 5, y: 34 },
+      attackingPosition: { x: 5, y: 50 },
+      defensivePosition: { x: 5, y: 50 },
     },
 
     // Centre Backs
     {
       id: "LCB",
       position: "CB",
-      attackingPosition: { x: 30, y: 18 },
-      defensivePosition: { x: 18, y: 18 },
+      attackingPosition: { x: 29, y: 26 },
+      defensivePosition: { x: 17, y: 26 },
     },
     {
       id: "CB",
       position: "CB",
-      attackingPosition: { x: 28, y: 34 },
-      defensivePosition: { x: 16, y: 34 },
+      attackingPosition: { x: 27, y: 50 },
+      defensivePosition: { x: 15, y: 50 },
     },
     {
       id: "RCB",
       position: "CB",
-      attackingPosition: { x: 30, y: 50 },
-      defensivePosition: { x: 18, y: 50 },
+      attackingPosition: { x: 29, y: 74 },
+      defensivePosition: { x: 17, y: 74 },
     },
 
     // Wingbacks
     {
       id: "LAM",
       position: "LAM",
-      attackingPosition: { x: 65, y: 5 },
-      defensivePosition: { x: 35, y: 5 },
+      attackingPosition: { x: 62, y: 8 },
+      defensivePosition: { x: 34, y: 8 },
     },
     {
       id: "RAM",
       position: "RAM",
-      attackingPosition: { x: 65, y: 63 },
-      defensivePosition: { x: 35, y: 63 },
+      attackingPosition: { x: 62, y: 92 },
+      defensivePosition: { x: 34, y: 92 },
     },
 
     // Central Midfielders
     {
       id: "LCM",
       position: "CM",
-      attackingPosition: { x: 55, y: 24 },
-      defensivePosition: { x: 40, y: 24 },
+      attackingPosition: { x: 52, y: 35 },
+      defensivePosition: { x: 38, y: 35 },
     },
     {
       id: "RCM",
       position: "CM",
-      attackingPosition: { x: 55, y: 44 },
-      defensivePosition: { x: 40, y: 44 },
+      attackingPosition: { x: 52, y: 65 },
+      defensivePosition: { x: 38, y: 65 },
     },
 
     // Attackers
     {
       id: "LW",
       position: "LW",
-      attackingPosition: { x: 82, y: 10 },
-      defensivePosition: { x: 60, y: 10 },
+      attackingPosition: { x: 80, y: 15 },
+      defensivePosition: { x: 58, y: 15 },
     },
     {
       id: "ST",
       position: "ST",
-      attackingPosition: { x: 88, y: 34 },
-      defensivePosition: { x: 70, y: 34 },
+      attackingPosition: { x: 86, y: 50 },
+      defensivePosition: { x: 68, y: 50 },
     },
     {
       id: "RW",
       position: "RW",
-      attackingPosition: { x: 82, y: 58 },
-      defensivePosition: { x: 60, y: 58 },
+      attackingPosition: { x: 80, y: 85 },
+      defensivePosition: { x: 58, y: 85 },
     },
   ],
 };

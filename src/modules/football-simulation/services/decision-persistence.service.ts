@@ -46,7 +46,7 @@ export class DecisionPersistenceService {
     }
 
     const decision = calculateDecision();
-    if(context.ball.possessionPlayerId === playerId) debugLog(`inpossession ${playerId} action=${decision.action} rank=${context.formation?.ballRank}`);
+    //if(context.ball.possessionPlayerId === playerId) debugLog(`inpossession ${playerId} action=${decision.action} rank=${context.formation?.ballRank}`);
 
     this.storeDecision(playerId, decision);
 
