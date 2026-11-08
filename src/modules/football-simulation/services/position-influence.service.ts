@@ -20,6 +20,7 @@ export class PositionInfluenceService {
   > = {
     // Safe, simple distribution. Never shoot, dribble or run beyond the ball.
     CENTRE_BACK: {
+      TRACK_BACK:5,
       PASS: 8,
       LONG_BALL: 8,
       THROUGH_BALL: -10,
@@ -60,13 +61,13 @@ export class PositionInfluenceService {
 
     // Creators: through balls, some shooting and carrying.
     ATTACKING_MID: {
-      PASS: -6,
+      PASS: -10,
       THROUGH_BALL: 10,
       LONG_BALL: -6,
       DRIBBLE: 6,
       SHOOT: 2,
-      MAKE_RUN: 6,
-      SUPPORT: 2,
+      MAKE_RUN: 9,
+      SUPPORT: 3,
     },
 
     // Take players on and deliver crosses; seldom recycle the ball.
@@ -84,10 +85,10 @@ export class PositionInfluenceService {
     // Finish moves rather than build them: shoot, run in behind, and stay
     // forward instead of dropping to the ball.
     STRIKER: {
-      PASS: -38,
+      PASS: -24,
       THROUGH_BALL: -10,
       LONG_BALL: -16,
-      CROSS: -13,
+      CROSS: -30,
       DRIBBLE: 6,
       SHOOT: 6,
       HOLD_BALL: 4,

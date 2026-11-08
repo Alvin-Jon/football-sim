@@ -19,16 +19,12 @@ import type { FormationSlot } from "../types/formation.types.js";
 import type { FormationFluidity } from "../types/formation.types.js";
 
 export class DecisionEngineService {
-  // How many players per team may leave their position to chase the ball.
   private static readonly CHASER_COUNT = 2;
 
-  // How many players (by closeness to the ball) offer close support.
   private static readonly SUPPORT_COUNT = 3;
 
-  // Maximum score bonus for standing exactly on the shape position.
   private static readonly SHAPE_BONUS = 30;
 
-  // Score lost per metre outside the roam radius.
   private static readonly SHAPE_PENALTY_PER_METRE = 3;
   private readonly positionInfluenceService = new PositionInfluenceService();
   private readonly positionService = new DecisionPositionService();

@@ -61,6 +61,28 @@ interface LastCompletedPass {
   tick: number;
 }
 
+// A decision made during the planning phase and applied in the execution
+// phase of the same tick.
+interface PlannedAction {
+  team: Team;
+  teamState: TeamMatchState;
+  player: Player;
+  state: PlayerMatchState;
+  context: DecisionContext;
+  decision: DecisionResult;
+}
+
+// Actions that only make sense while the player holds the ball.
+const ON_BALL_ACTIONS: ReadonlyArray<DecisionResult["action"]> = [
+  "PASS",
+  "THROUGH_BALL",
+  "LONG_BALL",
+  "CROSS",
+  "SHOOT",
+  "DRIBBLE",
+  "HOLD_BALL",
+];
+
 export class MatchActionService {
   private static readonly RELEASE_LOCKOUT_TICKS = 10;
   private static readonly TACKLE_COOLDOWN_TICKS = 60;
@@ -90,7 +112,7 @@ export class MatchActionService {
   private readonly passing: PassingService;
   private readonly receiving: ReceivingService;
   private readonly shooting: ShootingService;
-  private readonly interception : InterceptionService;
+  private readonly interception: InterceptionService;
   private readonly goalkeeperPositioning = new GoalkeeperPositioningService();
   private readonly goalkeeperPrediction = new GoalkeeperPredictionService(
     this.trajectory,
@@ -129,10 +151,10 @@ export class MatchActionService {
     this.shooting = new ShootingService(this.ballInteraction, random);
     this.goalkeeperSave = new GoalkeeperSaveService(random);
     this.interception = new InterceptionService(
-        this.ballInteraction,
-        this.trajectory,
-        random
-      );
+      this.ballInteraction,
+      this.trajectory,
+      random,
+    );
   }
 
   update(match: MatchState, deltaTime: number): MatchState {
@@ -143,43 +165,63 @@ export class MatchActionService {
 
     this.ballPhysics.update(match.ball, deltaTime);
 
-    this.updateGoalkeeper(
-      match,
-      match.homeTeam,
-      match.homeTeamState,
-      match.awayTeam,
-      match.awayTeamState,
-      match.homeDirection,
-    );
-
-    this.updateGoalkeeper(
-      match,
-      match.awayTeam,
-      match.awayTeamState,
-      match.homeTeam,
-      match.homeTeamState,
-      match.awayDirection,
-    );
+    // Goalkeepers run in a random order so neither side always goes first.
+    const keepers: Array<() => void> = [
+      () =>
+        this.updateGoalkeeper(
+          match,
+          match.homeTeam,
+          match.homeTeamState,
+          match.awayTeam,
+          match.awayTeamState,
+          match.homeDirection,
+        ),
+      () =>
+        this.updateGoalkeeper(
+          match,
+          match.awayTeam,
+          match.awayTeamState,
+          match.homeTeam,
+          match.homeTeamState,
+          match.awayDirection,
+        ),
+    ];
+    this.shuffle(keepers);
+    for (const run of keepers) run();
 
     this.receiveFreeBall(match);
 
-    this.updateOutfieldPlayers(
-      match,
-      match.homeTeam,
-      match.homeTeamState,
-      match.awayTeam,
-      match.awayTeamState,
-      match.homeDirection,
-    );
+    const planned: PlannedAction[] = [
+      ...this.planOutfieldActions(
+        match,
+        match.homeTeam,
+        match.homeTeamState,
+        match.awayTeam,
+        match.awayTeamState,
+        match.homeDirection,
+      ),
+      ...this.planOutfieldActions(
+        match,
+        match.awayTeam,
+        match.awayTeamState,
+        match.homeTeam,
+        match.homeTeamState,
+        match.awayDirection,
+      ),
+    ];
 
-    this.updateOutfieldPlayers(
-      match,
-      match.awayTeam,
-      match.awayTeamState,
-      match.homeTeam,
-      match.homeTeamState,
-      match.awayDirection,
-    );
+    this.shuffle(planned);
+    for (const action of planned) {
+      this.executeDecision(
+        match,
+        action.team,
+        action.teamState,
+        action.player,
+        action.state,
+        action.context,
+        action.decision,
+      );
+    }
 
     this.resolvePitchBoundary(
       match,
@@ -191,6 +233,14 @@ export class MatchActionService {
     this.trackPossessionChange(match);
 
     return match;
+  }
+
+  // Fisher-Yates shuffle using the seeded random, so runs stay reproducible.
+  private shuffle<T>(items: T[]): void {
+    for (let i = items.length - 1; i > 0; i--) {
+      const j = Math.floor(this.random() * (i + 1));
+      [items[i], items[j]] = [items[j]!, items[i]!];
+    }
   }
 
   private lockOut(match: MatchState, playerId: string): void {
@@ -283,8 +333,7 @@ export class MatchActionService {
     return (this.possessionShields.get(playerId) ?? 0) > match.tick;
   }
 
-  // Any time a new player gains the ball (reception, interception, keeper
-  // claim, tackle), protect them briefly and end any shot still in flight.
+
   private trackPossessionChange(match: MatchState): void {
     const holder = match.ball.possessionPlayerId;
 
@@ -327,6 +376,18 @@ export class MatchActionService {
     this.ballInteraction.updateControlledBall(player.state, match.ball);
     this.resolvePendingPass(match, playerId);
   }
+
+
+  // this in testing didn't like the result so using shuffle for now 
+  private reactionPriority(player: Player): number {
+  const a = player.attributes;
+  const base =
+    a.anticipation * 0.35 +
+    a.decisions * 0.25 +
+    a.composure * 0.2 +
+    a.concentration * 0.2; 
+  return base + (this.random() - 0.5) * 12;
+}
 
   private getPlayerTeamId(
     match: MatchState,
@@ -612,14 +673,18 @@ export class MatchActionService {
     }
   }
 
-  private updateOutfieldPlayers(
+  // Planning phase: decide for every outfield player of one team without
+  // executing anything.
+  private planOutfieldActions(
     match: MatchState,
     team: Team,
     teamState: TeamMatchState,
     opponents: Team,
     opponentState: TeamMatchState,
     direction: PlayingDirection,
-  ): void {
+  ): PlannedAction[] {
+    const planned: PlannedAction[] = [];
+
     for (const player of team.players) {
       if (player.position === "GK") continue;
       const state = teamState.playerStates[player.id];
@@ -637,8 +702,10 @@ export class MatchActionService {
         direction,
       );
       const decision = this.decisionEngine.decide(context);
-      this.executeDecision(match, team, teamState, player, state, context, decision);
+      planned.push({ team, teamState, player, state, context, decision });
     }
+
+    return planned;
   }
 
   private createDecisionContext(
@@ -693,8 +760,10 @@ export class MatchActionService {
       tick: match.tick,
       phase,
       attackingDirection: direction,
+      // Copy the position so an action executed earlier in this tick cannot
+      // change what other players "saw" when they decided.
       ball: {
-        position: match.ball.position,
+        position: { ...match.ball.position },
         possessionTeamId: match.ball.possessionTeamId,
         possessionPlayerId: match.ball.possessionPlayerId,
       },
@@ -727,8 +796,7 @@ export class MatchActionService {
     return slots[samePosition.indexOf(player)] ?? slots[0];
   }
 
-  // Hard limit: a non-chasing player's movement target cannot leave their
-  // roam radius around the formation shape position.
+
   private constrainToFormation(
     decision: DecisionResult,
     context: DecisionContext,
@@ -771,6 +839,13 @@ export class MatchActionService {
     context: DecisionContext,
     decision: DecisionResult,
   ): void {
+    if (
+      ON_BALL_ACTIONS.includes(decision.action) &&
+      match.ball.possessionPlayerId !== player.id
+    ) {
+      return;
+    }
+
     switch (decision.action) {
       case "PRESS":
         this.actionEngine.execute(state, decision, match.tick);
@@ -810,8 +885,6 @@ export class MatchActionService {
           match.ball,
         );
 
-        // Interceptions are recorded in resolvePendingPass, and only when the
-        // ball was an opponent's pass.
         return;
       }
 
@@ -864,7 +937,6 @@ export class MatchActionService {
 
       case "TACKLE":
       case "HARD_TACKLE":
-        //debugLog(`DEF ${player.id} action=${decision.action} rank=${context.formation?.ballRank}`);
         this.executeTackle(match, team.id, player, state, context, decision);
         return;
     }
@@ -1038,8 +1110,6 @@ export class MatchActionService {
         predictedShot?.isOnTarget ?? false,
       );
 
-      // Only credit an assist if the shooter actually received the last
-      // completed pass, from a teammate, within the assist window.
       const lastPass = this.lastCompletedPasses.get(match.id);
 
       const assistPlayerId =
@@ -1130,12 +1200,14 @@ export class MatchActionService {
     context: DecisionContext,
     decision: DecisionResult,
   ): void {
-    //debugLog(`TACKLE reached: ${player.id} ${decision.action} target=${decision.targetPlayerId}`);
     const carrierId = decision.targetPlayerId ?? context.ball.possessionPlayerId;
     const carrier = context.opponents.find(
       (opponent) => opponent.player.id === carrierId,
     );
     if (!carrier) return;
+
+    if (match.ball.possessionPlayerId !== carrier.player.id) return;
+
     const distance = PitchService.getDistance(state.position, carrier.state.position);
     if (distance > 3) {
       state.targetPosition = { ...carrier.state.position };
@@ -1145,8 +1217,6 @@ export class MatchActionService {
     }
     this.cancelRunningAction(player.id, state); // only once we're really tackling
 
-    // Tackler on cooldown, or carrier just won the ball: keep closing the
-    // carrier down instead of tackling (or standing still).
     const onCooldown = (this.tackleCooldowns.get(player.id) ?? 0) > match.tick;
     if (onCooldown || this.isShielded(match, carrier.player.id)) {
       state.targetPosition = { ...carrier.state.position };
@@ -1213,8 +1283,6 @@ export class MatchActionService {
     const receiverTeamId = this.getPlayerTeamId(match, receiverId);
 
     if (receiverTeamId === pending.teamId) {
-      // Reaching ANY teammate is a completed pass, not just the one the
-      // passer was aiming at.
       MatchStatisticsService.completePass(
         match,
         pending.teamId,
@@ -1266,9 +1334,6 @@ export class MatchActionService {
     return undefined;
   }
 
-  // The save roll is made ONCE per shot. Rolling every tick while the ball
-  // approaches gave the keeper several attempts at the same shot, so the
-  // result depended on how many ticks the ball took to arrive.
   private rollShotSave(
     match: MatchState,
     goalkeeperId: string,
@@ -1297,8 +1362,7 @@ export class MatchActionService {
     return result.successful;
   }
 
-  // A save only counts when it stops a recent shot by the other team.
-  // Catching a pass, a loose ball or a cross is not a save.
+
   private recordGoalkeeperSave(
     match: MatchState,
     teamId: string,
@@ -1330,9 +1394,6 @@ export class MatchActionService {
   ): void {
     const currentPosition = match.ball.position;
 
-    // A ball held by a player cannot score. Without this, picking the ball
-    // up next to the goal line moves it across the line and counts a goal
-    // that no shot produced.
     if (match.ball.possessionPlayerId !== null) {
       match.ball.position = PitchService.clampPosition(currentPosition);
       return;
