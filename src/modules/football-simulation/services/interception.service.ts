@@ -115,7 +115,7 @@ export class InterceptionService {
     // Otherwise, move towards the predicted interception point.
     defender.state.targetPosition = bestCandidate.interceptionPosition;
     defender.state.isMoving = true;
-    defender.state.currentAction = "MOVING";
+    defender.state.currentAction = "INTERCEPTING";
 
     return {
       intercepted: false,

@@ -9,6 +9,7 @@ export type PlayerAction =
   | "TACKLING"
   | "MARKING"
   | "PRESSING"
+  | "INTERCEPTING"
   | "JUMPING"
   | "RUNNING"
   | "SPRINTING";

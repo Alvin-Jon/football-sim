@@ -105,6 +105,10 @@ export class ActionEngineService {
         state.currentAction = "RUNNING";
         break;
 
+      case "INTERCEPT":
+        state.currentAction = "INTERCEPTING";
+        break;
+
       default:
         state.currentAction = "MOVING";
         break;

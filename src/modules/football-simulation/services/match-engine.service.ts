@@ -40,6 +40,7 @@ export class MatchEngineService {
     team: Team,
     playerStates: MatchState["homeTeamState"]["playerStates"],
     deltaTime: number,
+    nearbyPlayerStates: readonly MatchState["homeTeamState"]["playerStates"][string][],
   ) {
     const updatedStates = { ...playerStates };
 
@@ -52,6 +53,7 @@ export class MatchEngineService {
         player,
         state,
         deltaTime,
+        nearbyPlayerStates,
       );
 
       updatedState = PlayerStaminaService.updateStamina(
@@ -119,17 +121,18 @@ finishMatch(match: MatchState): MatchState {
     }
 
     const deltaTime = this.getDeltaTime();
-
     const homePlayerStates = this.updateTeam(
       match.homeTeam,
       match.homeTeamState.playerStates,
       deltaTime,
+      Object.values(match.homeTeamState.playerStates),
     );
 
     const awayPlayerStates = this.updateTeam(
       match.awayTeam,
       match.awayTeamState.playerStates,
       deltaTime,
+      Object.values(match.awayTeamState.playerStates),
     );
 
     const clock = MatchClockService.update(

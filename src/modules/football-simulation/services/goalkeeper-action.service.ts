@@ -32,6 +32,8 @@ export class GoalkeeperActionService {
         state.currentAction =
           decision.action === "DIVE"
             ? "JUMPING"
+            : decision.action === "RUSH_OUT"
+              ? "RUNNING"
             : "MOVING";
 
         break;
