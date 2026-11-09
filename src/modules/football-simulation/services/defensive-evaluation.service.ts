@@ -85,6 +85,8 @@ export class DefensiveEvaluationService {
       score -= 4;
     }
 
+    score += context.tactics.pressBonus;
+
     return score;
   }
 
@@ -246,6 +248,8 @@ export class DefensiveEvaluationService {
     if (teammatesChallenging > 0) {
       score -= 10;
     }
+
+    score += context.tactics.pressBonus * 0.5;
 
     return score;
   }

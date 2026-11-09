@@ -1,6 +1,7 @@
 export * from "./types/player.types.js";
 export * from "./types/player-state.types.js";
 export * from "./types/team.types.js";
+export * from "./types/tactics.types.js";
 export * from "./types/match.types.js";
 export * from "./types/pitch.types.js";
 export * from "./types/formation.types.js";
@@ -22,6 +23,7 @@ export * from "./types/decision.types.js";
 export * from "./services/player-traits.service.js";
 export * from "./services/decision-evaluation.service.js";
 export * from "./services/decision-engine.service.js";
+export * from "./services/tactics.service.js";
 
 export * from "./services/pitch.service.js";
 export * from "./services/formation.service.js";

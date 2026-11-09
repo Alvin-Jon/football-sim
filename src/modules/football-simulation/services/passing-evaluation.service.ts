@@ -43,15 +43,23 @@ export class PassingEvaluationService {
       return -100;
     }
 
-    const laneRisk = this.evaluatePassingLane(
-      passerPosition,
-      receiverPosition,
-      context,
+    const penaltyScale = 1 / context.tactics.riskTolerance;
+
+    const laneRisk = this.scalePenalty(
+      this.evaluatePassingLane(
+        passerPosition,
+        receiverPosition,
+        context,
+      ),
+      penaltyScale,
     );
 
-    const receiverPressure = this.evaluateReceiverPressure(
-      receiverPosition,
-      context,
+    const receiverPressure = this.scalePenalty(
+      this.evaluateReceiverPressure(
+        receiverPosition,
+        context,
+      ),
+      penaltyScale,
     );
 
     const passerPressure = this.evaluatePasserPressure(
@@ -59,9 +67,12 @@ export class PassingEvaluationService {
       context,
     );
 
-    const distanceScore = this.evaluateDistance(
-      distance,
-      candidate.action,
+    const distanceScore = this.scalePenalty(
+      this.evaluateDistance(
+        distance,
+        candidate.action,
+      ),
+      penaltyScale,
     );
 
     const forwardScore = this.evaluateForwardProgress(
@@ -71,9 +82,12 @@ export class PassingEvaluationService {
       context,
     );
 
-    const spaceScore = this.evaluateReceiverSpace(
-      receiverPosition,
-      context,
+    const spaceScore = this.scalePenalty(
+      this.evaluateReceiverSpace(
+        receiverPosition,
+        context,
+      ),
+      penaltyScale,
     );
 
     return (
@@ -84,6 +98,10 @@ export class PassingEvaluationService {
       forwardScore +
       spaceScore
     );
+  }
+
+  private scalePenalty(value: number, scale: number): number {
+    return value < 0 ? value * scale : value;
   }
 
   private evaluatePassingLane(

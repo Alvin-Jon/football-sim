@@ -17,10 +17,10 @@ import { ShootingEvaluationService } from "./shooting-evaluation.service.js";
 import { PositionInfluenceService } from "./position-influence.service.js";
 import type { FormationSlot } from "../types/formation.types.js";
 import type { FormationFluidity } from "../types/formation.types.js";
+import { TacticsService } from "./tactics.service.js";
+
 
 export class DecisionEngineService {
-  private static readonly CHASER_COUNT = 2;
-
   private static readonly SUPPORT_COUNT = 3;
 
   private static readonly SHAPE_BONUS = 30;
@@ -166,9 +166,7 @@ export class DecisionEngineService {
     const playerPosition = context.player.state.position;
 
     // Only the players closest to the ball may chase it.
-    const isChaser =
-      !formation ||
-      formation.ballRank < DecisionEngineService.CHASER_COUNT;
+    const isChaser = !formation || TacticsService.isChaser(formation.ballRank, context.tactics);
 
     const nearestOpponent = this.findNearestOpponent(
       playerPosition,
@@ -192,11 +190,13 @@ export class DecisionEngineService {
       // Designated chasers and anyone close to the carrier ENGAGE the ball.
       // Engaged players only press or tackle: holding shape or marking must
       // never outscore a tackle for a player standing next to the carrier.
-      const engaged =
-        defensiveTarget !== undefined &&
-        (isChaser || carrierDistance <= 6);
-
-      if (engaged && defensiveTarget) {
+      const inZone = TacticsService.isInPressZone(context);
+      if (defensiveTarget !== undefined &&
+      (
+        (inZone && (isChaser || carrierDistance <= 6)) ||
+        carrierDistance <= TacticsService.CLOSE_PRESS_DISTANCE
+      )
+      ) {
         candidates.push({
           action: "PRESS",
           score: 0,
@@ -372,9 +372,7 @@ export class DecisionEngineService {
     ];
 
     if (!constrained.includes(candidate.action)) return 0;
-
-    const isChaser =
-      formation.ballRank < DecisionEngineService.CHASER_COUNT;
+    const isChaser = TacticsService.isChaser(formation.ballRank, context.tactics);
 
     // Chasers may abandon their position to win a loose ball.
     if (isChaser && context.phase === "TRANSITION") return 0;

@@ -1,6 +1,7 @@
 import type { Player } from "./player.types.js";
 import type { PlayerMatchState } from "./player-state.types.js";
 import type { Vector2D, MatchPhase } from "./pitch.types.js";
+import type { TacticalModifiers } from "./tactics.types.js";
 
 export type DecisionAction =
   | "PASS"
@@ -60,6 +61,7 @@ export interface DecisionContext {
   opponents: DecisionPlayer[];
 
   goalPosition: Vector2D;
+  tactics: TacticalModifiers;
 
   formation?: {
   shapePosition: Vector2D;

@@ -3,7 +3,7 @@ import type {
   DecisionCandidate,
   DecisionContext,
 } from "../types/decision.types.js";
-
+import { TacticsService } from "./tactics.service.js";
 import { DecisionPositionService } from "./decision-position.service.js";
 import { PlayerTraitService } from "./player-traits.service.js";
 
@@ -262,7 +262,7 @@ export class DecisionEvaluationService {
         ? context.player.player.attributes.teamwork * 0.3
         : 0;
 
-    return this.clamp(
+    const base = this.clamp(
       candidate.score +
       attributeInfluence +
       traitInfluence +
@@ -270,5 +270,7 @@ export class DecisionEvaluationService {
       situationalScore +
       teamworkInfluence,
     );
+
+    return base + TacticsService.getActionBias(context.tactics, action);
   }
 }

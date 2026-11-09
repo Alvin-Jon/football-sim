@@ -19,10 +19,22 @@ export type TeamMentality =
   | "ATTACKING"
   | "VERY_ATTACKING";
 
+
+export type PressingStyle = "ALL_OVER_PITCH" | "MID_BLOCK" | "OWN_HALF";
+
+export type DefensiveLine =
+  | "VERY_DEEP"
+  | "DEEP"
+  | "STANDARD"
+  | "HIGH"
+  | "VERY_HIGH";
+
 export interface TeamTactics {
   style: TeamStyle;
   mentality: TeamMentality;
   formationFluidity: FormationFluidity;
+  pressing?: PressingStyle;
+  defensiveLine?: DefensiveLine;
 }
 
 export interface Team {

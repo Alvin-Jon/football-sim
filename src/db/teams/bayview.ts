@@ -41,9 +41,11 @@ export const BAYVIEW: Team = {
     color: "white",
     formation,   
     tactics: {
-        style: "POSSESSION",
-        mentality: "BALANCED",
+        style: "COUNTER_ATTACKING",
+        mentality: "ATTACKING",
         formationFluidity: "FLUID",
+        pressing:"ALL_OVER_PITCH",
+        defensiveLine: "HIGH",
     },
     players: players,
 };

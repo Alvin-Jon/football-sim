@@ -38,6 +38,8 @@ import { ShootingService } from "./shooting.service.js";
 import { MatchStatisticsService } from "./match-statistics.service.js";
 import type { PassKind } from "../types/statistics.types.js";
 import { FormationPositioningService } from "./formation-positioning.service.js";
+import { TacticsService } from "./tactics.service.js";
+
 
 interface PendingPass {
   passerId: string;
@@ -61,8 +63,6 @@ interface LastCompletedPass {
   tick: number;
 }
 
-// A decision made during the planning phase and applied in the execution
-// phase of the same tick.
 interface PlannedAction {
   team: Team;
   teamState: TeamMatchState;
@@ -72,7 +72,6 @@ interface PlannedAction {
   decision: DecisionResult;
 }
 
-// Actions that only make sense while the player holds the ball.
 const ON_BALL_ACTIONS: ReadonlyArray<DecisionResult["action"]> = [
   "PASS",
   "THROUGH_BALL",
@@ -286,7 +285,7 @@ export class MatchActionService {
     const holdTicks =
       nearestOpponent < MatchActionService.PRESSURE_DISTANCE
         ? MatchActionService.PRESSURE_HOLD_TICKS
-        : MatchActionService.MIN_HOLD_TICKS;
+        : TacticsService.scaleHoldTicks(MatchActionService.MIN_HOLD_TICKS, context.tactics);
 
     return match.tick - started < holdTicks;
   }
@@ -419,14 +418,13 @@ export class MatchActionService {
         PitchService.getDistance(b.state.position, match.ball.position),
     );
 
-    // Only the two closest players per team (plus the intended receiver of
-    // a pass) may run towards a loose ball. Everyone can still control it
-    // if it reaches them.
     const chasers = new Set<string>();
-    for (const teamId of [match.homeTeam.id, match.awayTeam.id]) {
+    for (const team of [match.homeTeam, match.awayTeam]) {
+      const count = TacticsService.resolve(team.tactics).pressChasers;
+
       candidates
-        .filter(({ player }) => this.getPlayerTeamId(match, player.id) === teamId)
-        .slice(0, 2)
+        .filter(({ player }) => this.getPlayerTeamId(match, player.id) === team.id)
+        .slice(0, count)
         .forEach(({ player }) => chasers.add(player.id));
     }
     const pendingPass = this.pendingPasses.get(match.id);
@@ -743,6 +741,7 @@ export class MatchActionService {
     ).length;
 
     const slot = this.getFormationSlot(team, player);
+    const tactics = TacticsService.resolve(team.tactics);
     const formation = slot
       ? {
           ...FormationPositioningService.getShape(
@@ -751,6 +750,7 @@ export class MatchActionService {
             match.ball.position,
             direction,
             team.tactics.formationFluidity,
+            tactics
           ),
           ballRank,
         }
@@ -760,8 +760,7 @@ export class MatchActionService {
       tick: match.tick,
       phase,
       attackingDirection: direction,
-      // Copy the position so an action executed earlier in this tick cannot
-      // change what other players "saw" when they decided.
+      tactics,
       ball: {
         position: { ...match.ball.position },
         possessionTeamId: match.ball.possessionTeamId,
@@ -806,7 +805,7 @@ export class MatchActionService {
 
     if (!formation || !target) return decision;
 
-    const isChaser = formation.ballRank < 2;
+    const isChaser = TacticsService.isChaser(formation.ballRank, context.tactics);
 
     if (isChaser && context.phase === "TRANSITION") return decision;
 

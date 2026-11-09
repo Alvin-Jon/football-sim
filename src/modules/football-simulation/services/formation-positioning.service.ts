@@ -6,10 +6,12 @@ import type {
 
 import type { MatchPhase, Vector2D } from "../types/pitch.types.js";
 import type { PlayingDirection } from "../types/match.types.js";
+import type { TacticalModifiers } from "../types/tactics.types.js";
 
 import { PITCH_DIMENSIONS } from "../constants/pitch.constants.js";
 import { PitchService } from "./pitch.service.js";
 import { FormationCoordinatesService } from "./formation-coordinate.service.js";
+import { TacticsService } from "./tactics.service.js";
 
 type PlayerLine = "DEFENCE" | "MIDFIELD" | "ATTACK";
 
@@ -19,7 +21,6 @@ export interface FormationShape {
 }
 
 export class FormationPositioningService {
-  // How much of the ball offset each line follows.
   private static readonly BALL_PULL = {
     DEFENCE: { x: 0.3, y: 0.25 },
     MIDFIELD: { x: 0.35, y: 0.3 },
@@ -42,21 +43,26 @@ export class FormationPositioningService {
     FLUID: 1.2,
   };
 
+
+  private static readonly MAX_DEFENCE_PROGRESS = 0.62;
+
+  private static readonly ATTACKING_DEFENCE_LINE_SHARE = 0.5;
+
   static getShape(
     slot: FormationSlot,
     phase: MatchPhase,
     ballPosition: Vector2D,
     direction: PlayingDirection,
     fluidity: FormationFluidity,
+    tactics: TacticalModifiers = TacticsService.NEUTRAL,
   ): FormationShape {
     const line = this.getLine(slot);
 
     const normalizedAnchor = this.getAnchor(slot, phase);
 
-    // Convert the normalized anchor into actual pitch coordinates.
-    const anchor = FormationCoordinatesService.toPitch(normalizedAnchor);
+    const baseAnchor = FormationCoordinatesService.toPitch(normalizedAnchor);
+    const anchor = this.applyTactics(baseAnchor, line, phase, tactics);
 
-    // Transform the ball into the team's local playing direction.
     const ball = PitchService.transformPosition(ballPosition, direction);
 
     const pull = this.BALL_PULL[line];
@@ -89,7 +95,6 @@ export class FormationPositioningService {
     });
 
     return {
-      // Transform back into the actual pitch coordinate system.
       shapePosition: PitchService.transformPosition(local, direction),
 
       roamRadius:
@@ -97,6 +102,31 @@ export class FormationPositioningService {
         PITCH_DIMENSIONS.length *
         (this.FLUIDITY_ROAM[fluidity] ?? 1),
     };
+  }
+
+  private static applyTactics(
+    anchor: Vector2D,
+    line: PlayerLine,
+    phase: MatchPhase,
+    tactics: TacticalModifiers,
+  ): Vector2D {
+    let x = anchor.x;
+
+    if (line === "DEFENCE") {
+      const share =
+        phase === "ATTACKING" ? this.ATTACKING_DEFENCE_LINE_SHARE : 1;
+
+      x += tactics.defensiveLineHeight * share;
+
+      x = Math.min(x, this.MAX_DEFENCE_PROGRESS * PITCH_DIMENSIONS.length);
+    } else {
+      x += tactics.lineHeight;
+    }
+
+    const centreY = PITCH_DIMENSIONS.width / 2;
+    const y = centreY + (anchor.y - centreY) * tactics.width;
+
+    return { x, y };
   }
 
   private static getAnchor(
