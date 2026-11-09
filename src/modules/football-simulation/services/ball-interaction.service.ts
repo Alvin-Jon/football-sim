@@ -81,6 +81,7 @@ export class BallInteractionService {
   ): void {
     ball.possessionPlayerId = playerId;
     ball.possessionTeamId = teamId;
+    ball.lastTouchTeamId = teamId;
 
     ball.velocity = { x: 0, y: 0 };
     ball.verticalVelocity = 0;

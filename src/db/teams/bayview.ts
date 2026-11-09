@@ -35,6 +35,13 @@ const players: Player[] = BAYVIEW_PLAYERS.map((player, index) => {
   };
 });
 
+const setPieceTakerId = players.find(
+  (player) => player.position === "CM",
+)?.id;
+if (!setPieceTakerId) {
+  throw new Error("Bayview Athletic has no central midfielder for set pieces");
+}
+
 export const BAYVIEW: Team = {
     id: "BAYVIEW",
     name: "Bayview Athletic",
@@ -44,6 +51,8 @@ export const BAYVIEW: Team = {
         style: "COUNTER_ATTACKING",
         mentality: "ATTACKING",
         formationFluidity: "FLUID",
+        setPieceTakerId,
+        cornerAttackersInBox: 6,
         pressing:"ALL_OVER_PITCH",
         defensiveLine: "HIGH",
     },

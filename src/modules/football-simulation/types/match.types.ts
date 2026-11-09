@@ -19,6 +19,15 @@ export interface BallState {
   spin: number;
   possessionTeamId: string | null;
   possessionPlayerId: string | null;
+  lastTouchTeamId?: string | null;
+}
+
+export interface SetPieceRestart {
+  type: "CORNER" | "THROW_IN" | "KICK_OFF";
+  teamId: string;
+  position: Vector2D;
+  takerId?: string;
+  receiverIds?: string[];
 }
 
 export interface MatchClock {
@@ -47,6 +56,8 @@ export interface MatchState {
   tick: number;
 
   ball: BallState;
+
+  restart: SetPieceRestart | null;
 
   statistics: MatchStatistics;
 }

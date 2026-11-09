@@ -54,6 +54,13 @@ const players: Player[] = MANFIELD_PLAYERS.map((player, index) => {
   };
 });
 
+const setPieceTakerId = players.find(
+  (player) => player.position === "AM",
+)?.id;
+if (!setPieceTakerId) {
+  throw new Error("Manfield United has no attacking midfielder for set pieces");
+}
+
 export const MANFIELD: Team = {
   id: "MANFIELD",
   name: "Manfield United",
@@ -63,6 +70,8 @@ export const MANFIELD: Team = {
     style: "DIRECT",
     mentality: "VERY_DEFENSIVE",
     formationFluidity: "FLUID",
+    setPieceTakerId,
+    cornerAttackersInBox: 6,
     pressing: "OWN_HALF",
     defensiveLine: "DEEP"
   },

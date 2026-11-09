@@ -33,6 +33,8 @@ export interface TeamTactics {
   style: TeamStyle;
   mentality: TeamMentality;
   formationFluidity: FormationFluidity;
+  setPieceTakerId: string;
+  cornerAttackersInBox?: number;
   pressing?: PressingStyle;
   defensiveLine?: DefensiveLine;
 }

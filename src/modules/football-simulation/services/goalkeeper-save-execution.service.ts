@@ -81,6 +81,7 @@ export class GoalkeeperSaveExecutionService {
     context: GoalkeeperContext,
     ball: BallState,
   ): void {
+    ball.lastTouchTeamId = context.goalkeeper.teamId;
     const attackingRight = context.attackingDirection === "LEFT_TO_RIGHT";
 
     // Out of the goal, towards the pitch.
@@ -111,6 +112,7 @@ export class GoalkeeperSaveExecutionService {
     context: GoalkeeperContext,
     ball: BallState,
   ): void {
+    ball.lastTouchTeamId = context.goalkeeper.teamId;
     const direction =
       context.attackingDirection === "LEFT_TO_RIGHT"
         ? 0

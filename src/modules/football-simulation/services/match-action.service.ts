@@ -9,7 +9,11 @@ import type {
   GoalkeeperContext,
   GoalkeeperSaveType,
 } from "../types/goalkeeper.types.js";
-import type { MatchState, PlayingDirection } from "../types/match.types.js";
+import type {
+  MatchState,
+  PlayingDirection,
+  SetPieceRestart,
+} from "../types/match.types.js";
 import type { Player } from "../types/player.types.js";
 import type { PlayerMatchState } from "../types/player-state.types.js";
 import type { Team } from "../types/team.types.js";
@@ -47,6 +51,7 @@ interface PendingPass {
   teamId: string;
   tick: number;
   kind: PassKind;
+  miscontrolledPlayerIds: Set<string>;
 }
 
 interface PendingShot {
@@ -157,6 +162,15 @@ export class MatchActionService {
   }
 
   update(match: MatchState, deltaTime: number): MatchState {
+    if (match.restart) {
+      this.positionPlayersForRestart(match, match.restart);
+      if (this.isRestartSetupComplete(match, match.restart)) {
+        this.takeRestart(match);
+      }
+      this.updatePossessionFlags(match);
+      return match;
+    }
+
     this.updateControlledBall(match);
 
     const previousBallPosition = { ...match.ball.position };
@@ -433,13 +447,23 @@ export class MatchActionService {
     for (const { player, state } of candidates) {
       if (match.ball.possessionPlayerId !== null) return;
 
-      this.receiving.attemptReceive(
+      const receiveResult = this.receiving.attemptReceive(
         player,
         state,
         this.getPlayerTeamId(match, player.id),
         match.ball,
         chasers.has(player.id),
       );
+
+      if (receiveResult.outcome === "MISCONTROLLED") {
+        const pending = this.pendingPasses.get(match.id);
+        if (pending && !pending.miscontrolledPlayerIds.has(player.id)) {
+          pending.miscontrolledPlayerIds.add(player.id);
+          debugLog(
+            `[pass] receiver_miscontrol match=${match.id} tick=${match.tick} kind=${pending.kind} passer=${this.findPlayer(match, pending.passerId)?.player.name ?? pending.passerId} intendedReceiver=${pending.receiverId ? this.findPlayer(match, pending.receiverId)?.player.name ?? pending.receiverId : "unspecified"} player=${player.name} controlChance=${receiveResult.controlChance.toFixed(2)} distance=${receiveResult.distanceToBall.toFixed(2)}m ballSpeed=${Math.hypot(match.ball.velocity.x, match.ball.velocity.y).toFixed(2)}`,
+          );
+        }
+      }
 
       if (match.ball.possessionPlayerId === player.id) {
         this.resolvePendingPass(match, player.id);
@@ -625,6 +649,7 @@ export class MatchActionService {
       );
 
       if (released) {
+        match.ball.lastTouchTeamId = team.id;
         this.lockOut(match, goalkeeper.id);
         MatchStatisticsService.recordPass(match, team.id, goalkeeper.id, "LONG");
         this.pendingPasses.set(match.id, {
@@ -633,6 +658,7 @@ export class MatchActionService {
           teamId: team.id,
           tick: match.tick,
           kind: "LONG",
+          miscontrolledPlayerIds: new Set(),
         });
       }
       return;
@@ -657,6 +683,7 @@ export class MatchActionService {
     );
 
     if (result.successful) {
+      match.ball.lastTouchTeamId = team.id;
       this.lockOut(match, goalkeeper.id);
       const keeperKind: PassKind = target.type === "LONG" ? "LONG" : "SHORT";
 
@@ -667,6 +694,7 @@ export class MatchActionService {
         teamId: team.id,
         tick: match.tick,
         kind: keeperKind,
+        miscontrolledPlayerIds: new Set(),
       });
     }
   }
@@ -974,8 +1002,14 @@ export class MatchActionService {
       },
       receiver,
     );
-    if (!result.successful) return;
+    if (!result.successful) {
+      debugLog(
+        `[pass] release_failed match=${match.id} tick=${match.tick} passer=${player.name} kind=${passType} reason=${result.message ?? "unknown"}`,
+      );
+      return;
+    }
 
+    match.ball.lastTouchTeamId = team.id;
     this.lockOut(match, player.id);
     state.currentAction = "PASSING";
 
@@ -986,6 +1020,7 @@ export class MatchActionService {
       teamId: team.id,
       tick: match.tick,
       kind: passType,
+      miscontrolledPlayerIds: new Set(),
     });
   }
 
@@ -1025,18 +1060,25 @@ export class MatchActionService {
       },
       receiver?.state,
     );
-    if (result.successful) {
-      this.lockOut(match, player.id);
-      state.currentAction = "PASSING";
-      MatchStatisticsService.recordPass(match, team.id, player.id, "CROSS");
-      this.pendingPasses.set(match.id, {
-        passerId: player.id,
-        receiverId: receiver?.player.id ?? null,
-        teamId: team.id,
-        tick: match.tick,
-        kind: "CROSS",
-      });
+    if (!result.successful) {
+      debugLog(
+        `[pass] release_failed match=${match.id} tick=${match.tick} passer=${player.name} kind=CROSS reason=${result.message ?? "unknown"}`,
+      );
+      return;
     }
+
+    match.ball.lastTouchTeamId = team.id;
+    this.lockOut(match, player.id);
+    state.currentAction = "PASSING";
+    MatchStatisticsService.recordPass(match, team.id, player.id, "CROSS");
+    this.pendingPasses.set(match.id, {
+      passerId: player.id,
+      receiverId: receiver?.player.id ?? null,
+      teamId: team.id,
+      tick: match.tick,
+      kind: "CROSS",
+      miscontrolledPlayerIds: new Set(),
+    });
   }
 
   private executeShot(
@@ -1059,6 +1101,7 @@ export class MatchActionService {
       context.opponents.map((opponent) => opponent.state),
     );
     if (result.successful) {
+      match.ball.lastTouchTeamId = team.id;
       this.lockOut(match, player.id);
       state.currentAction = "SHOOTING";
 
@@ -1297,6 +1340,12 @@ export class MatchActionService {
       });
     } else {
       // Intercepted by an opponent.
+      this.logPassFailure(
+        match,
+        pending,
+        "INTERCEPTED",
+        `interceptor=${this.findPlayer(match, receiverId)?.player.name ?? receiverId}`,
+      );
       MatchStatisticsService.recordInterception(
         match,
         receiverTeamId,
@@ -1306,6 +1355,24 @@ export class MatchActionService {
     }
 
     this.pendingPasses.delete(match.id);
+  }
+
+  private logPassFailure(
+    match: MatchState,
+    pending: PendingPass,
+    reason: string,
+    details: string,
+  ): void {
+    const passer = this.findPlayer(match, pending.passerId)?.player.name ??
+      pending.passerId;
+    const receiver = pending.receiverId
+      ? this.findPlayer(match, pending.receiverId)?.player.name ??
+        pending.receiverId
+      : "unspecified";
+
+    debugLog(
+      `[pass] failed match=${match.id} tick=${match.tick} kind=${pending.kind} passer=${passer} intendedReceiver=${receiver} reason=${reason} ${details}`,
+    );
   }
 
   private getDecisionPlayers(
@@ -1478,6 +1545,18 @@ export class MatchActionService {
           this.pendingPasses.delete(match.id);
           this.lastCompletedPasses.delete(match.id);
           this.resetBall(match);
+          const concedingTeam =
+            scoringTeamId === match.homeTeam.id
+              ? match.awayTeam
+              : match.homeTeam;
+          match.restart = {
+            type: "KICK_OFF",
+            teamId: concedingTeam.id,
+            position: {
+              x: PITCH_DIMENSIONS.length / 2,
+              y: PITCH_DIMENSIONS.width / 2,
+            },
+          };
           return;
         }
 
@@ -1486,23 +1565,659 @@ export class MatchActionService {
       }
     }
 
-    const outsidePitch =
-      currentPosition.x < 0 ||
-      currentPosition.x > PITCH_DIMENSIONS.length ||
-      currentPosition.y < 0 ||
-      currentPosition.y > PITCH_DIMENSIONS.width;
+    const boundaryExit = this.getBoundaryExit(previousPosition, currentPosition);
+    if (boundaryExit) {
+      const pending = this.pendingPasses.get(match.id);
+      if (pending) {
+        this.logPassFailure(
+          match,
+          pending,
+          "BALL_OUT_OF_PLAY",
+          `position=(${currentPosition.x.toFixed(2)},${currentPosition.y.toFixed(2)})`,
+        );
+      }
 
-    if (outsidePitch) {
       this.pendingPasses.delete(match.id);
       this.lastCompletedPasses.delete(match.id);
+      const pendingShot = this.pendingShots.get(match.id);
+      this.pendingShots.delete(match.id);
 
-      match.ball.position = PitchService.clampPosition(currentPosition);
+      const lastTouchTeamId =
+        match.ball.lastTouchTeamId ??
+        pending?.teamId ??
+        pendingShot?.teamId;
+      const restart = this.getRestart(match, boundaryExit, lastTouchTeamId);
+
+      match.ball.position = PitchService.clampPosition(boundaryExit.position);
       match.ball.velocity = { x: 0, y: 0 };
       match.ball.verticalVelocity = 0;
       match.ball.height = 0;
       match.ball.possessionPlayerId = null;
       match.ball.possessionTeamId = null;
+      match.restart = restart;
+
+      if (restart) {
+        debugLog(
+          `[restart] type=${restart.type} team=${restart.teamId} position=(${restart.position.x.toFixed(2)},${restart.position.y.toFixed(2)})`,
+        );
+      }
     }
+  }
+
+  private getBoundaryExit(
+    previous: Vector2D,
+    current: Vector2D,
+  ): { type: "GOAL_LINE" | "TOUCHLINE"; position: Vector2D } | null {
+    const exits: Array<{
+      type: "GOAL_LINE" | "TOUCHLINE";
+      time: number;
+      position: Vector2D;
+    }> = [];
+    const delta = { x: current.x - previous.x, y: current.y - previous.y };
+
+    if (current.x < 0 && delta.x < 0) {
+      const time = -previous.x / delta.x;
+      exits.push({
+        type: "GOAL_LINE",
+        time,
+        position: { x: 0, y: previous.y + delta.y * time },
+      });
+    } else if (current.x > PITCH_DIMENSIONS.length && delta.x > 0) {
+      const time = (PITCH_DIMENSIONS.length - previous.x) / delta.x;
+      exits.push({
+        type: "GOAL_LINE",
+        time,
+        position: {
+          x: PITCH_DIMENSIONS.length,
+          y: previous.y + delta.y * time,
+        },
+      });
+    }
+
+    if (current.y < 0 && delta.y < 0) {
+      const time = -previous.y / delta.y;
+      exits.push({
+        type: "TOUCHLINE",
+        time,
+        position: { x: previous.x + delta.x * time, y: 0 },
+      });
+    } else if (current.y > PITCH_DIMENSIONS.width && delta.y > 0) {
+      const time = (PITCH_DIMENSIONS.width - previous.y) / delta.y;
+      exits.push({
+        type: "TOUCHLINE",
+        time,
+        position: {
+          x: previous.x + delta.x * time,
+          y: PITCH_DIMENSIONS.width,
+        },
+      });
+    }
+
+    return exits.sort((a, b) => a.time - b.time)[0] ?? null;
+  }
+
+  private getRestart(
+    match: MatchState,
+    exit: { type: "GOAL_LINE" | "TOUCHLINE"; position: Vector2D },
+    lastTouchTeamId: string | null | undefined,
+  ): SetPieceRestart | null {
+    if (!lastTouchTeamId) return null;
+
+    const lastTouchTeam = [match.homeTeam, match.awayTeam].find(
+      (team) => team.id === lastTouchTeamId,
+    );
+    if (!lastTouchTeam) return null;
+
+    const otherTeam =
+      lastTouchTeam.id === match.homeTeam.id ? match.awayTeam : match.homeTeam;
+
+    if (exit.type === "TOUCHLINE") {
+      return {
+        type: "THROW_IN",
+        teamId: otherTeam.id,
+        position: exit.position,
+      };
+    }
+
+    const goalDirection: PlayingDirection =
+      exit.position.x === PITCH_DIMENSIONS.length
+        ? "LEFT_TO_RIGHT"
+        : "RIGHT_TO_LEFT";
+    const attackingTeam =
+      match.homeDirection === goalDirection ? match.homeTeam : match.awayTeam;
+    const defendingTeam =
+      attackingTeam.id === match.homeTeam.id ? match.awayTeam : match.homeTeam;
+
+    if (lastTouchTeam.id !== defendingTeam.id) return null; 
+
+    return {
+      type: "CORNER",
+      teamId: attackingTeam.id,
+      position: {
+        x: exit.position.x,
+        y:
+          exit.position.y <= PITCH_DIMENSIONS.width / 2
+            ? 0
+            : PITCH_DIMENSIONS.width,
+      },
+    };
+  }
+
+  private takeRestart(match: MatchState): void {
+    const restart = match.restart;
+    if (!restart) return;
+
+    const isHome = restart.teamId === match.homeTeam.id;
+    const team = isHome
+      ? match.homeTeam
+      : restart.teamId === match.awayTeam.id
+        ? match.awayTeam
+        : undefined;
+    const teamState = isHome
+      ? match.homeTeamState
+      : restart.teamId === match.awayTeam.id
+        ? match.awayTeamState
+        : undefined;
+    if (!team || !teamState) {
+      throw new Error(`Unknown restart team ${restart.teamId}`);
+    }
+
+    const taker = team.players.find(
+      (player) =>
+        player.id ===
+        (restart.type === "THROW_IN"
+          ? restart.takerId
+          : team.tactics.setPieceTakerId),
+    );
+    if (!taker) {
+      throw new Error(
+        `${team.name} has no valid taker for ${restart.type.toLowerCase()}`,
+      );
+    }
+
+    const takerState = teamState.playerStates[taker.id];
+    if (!takerState) {
+      throw new Error(`No match state found for set-piece taker ${taker.name}`);
+    }
+
+    const direction = isHome ? match.homeDirection : match.awayDirection;
+    const teammates = this.getDecisionPlayers(team, teamState).filter(
+      ({ player }) => player.id !== taker.id,
+    );
+    const receiver = restart.type === "THROW_IN"
+      ? teammates.sort(
+          (a, b) =>
+            PitchService.getDistance(a.state.position, restart.position) -
+            PitchService.getDistance(b.state.position, restart.position),
+        )[0]
+      : restart.type === "KICK_OFF"
+        ? teammates.find(
+            ({ player }) => player.id === restart.receiverIds?.[0],
+          )
+      : teammates.sort(
+          (a, b) =>
+            this.positionService.getForwardDistance(
+              takerState.position,
+              b.state.position,
+              direction,
+            ) -
+            this.positionService.getForwardDistance(
+              takerState.position,
+              a.state.position,
+              direction,
+            ),
+        )[0];
+
+    if (!receiver) {
+      throw new Error(`${team.name} has no receiver for ${restart.type.toLowerCase()}`);
+    }
+
+    takerState.position = { ...restart.position };
+    takerState.targetPosition = null;
+    takerState.isMoving = false;
+    takerState.currentAction = "IDLE";
+    this.ballInteraction.assignPossession(taker.id, team.id, match.ball);
+    match.ball.position = { ...restart.position };
+
+    const passType = restart.type === "CORNER" ? "LONG" : "SHORT";
+    const passKind: PassKind = restart.type === "CORNER" ? "CROSS" : "SHORT";
+    const result = this.passing.executePass(
+      taker,
+      takerState,
+      team.id,
+      match.ball,
+      {
+        type: passType,
+        targetPosition: receiver.state.position,
+        targetPlayerId: receiver.player.id,
+      },
+      receiver.state,
+    );
+
+    if (!result.successful) {
+      throw new Error(
+        `Failed to take ${restart.type.toLowerCase()} for ${team.name}: ${result.message ?? "unknown error"}`,
+      );
+    }
+
+    match.ball.lastTouchTeamId = team.id;
+    this.lockOut(match, taker.id);
+    takerState.currentAction = "PASSING";
+    MatchStatisticsService.recordPass(match, team.id, taker.id, passKind);
+    this.pendingPasses.set(match.id, {
+      passerId: taker.id,
+      receiverId: receiver.player.id,
+      teamId: team.id,
+      tick: match.tick,
+      kind: passKind,
+      miscontrolledPlayerIds: new Set(),
+    });
+
+    match.restart = null;
+  }
+
+  private positionPlayersForRestart(
+    match: MatchState,
+    restart: SetPieceRestart,
+  ): void {
+    const attackingTeam =
+      restart.teamId === match.homeTeam.id ? match.homeTeam : match.awayTeam;
+    const defendingTeam =
+      attackingTeam.id === match.homeTeam.id ? match.awayTeam : match.homeTeam;
+    const attackingState =
+      attackingTeam.id === match.homeTeam.id
+        ? match.homeTeamState
+        : match.awayTeamState;
+    const defendingState =
+      defendingTeam.id === match.homeTeam.id
+        ? match.homeTeamState
+        : match.awayTeamState;
+    const attackingDirection =
+      attackingTeam.id === match.homeTeam.id
+        ? match.homeDirection
+        : match.awayDirection;
+    const defendingDirection =
+      defendingTeam.id === match.homeTeam.id
+        ? match.homeDirection
+        : match.awayDirection;
+
+    if (restart.type === "KICK_OFF") {
+      if (!restart.receiverIds?.length) {
+        const receiver = attackingTeam.players
+          .filter(
+            (player) =>
+              player.position !== "GK" &&
+              player.id !== attackingTeam.tactics.setPieceTakerId,
+          )
+          .map((player) => ({
+            player,
+            state: attackingState.playerStates[player.id],
+          }))
+          .filter(
+            (entry): entry is { player: Player; state: PlayerMatchState } =>
+              entry.state !== undefined,
+          )
+          .sort(
+            (a, b) =>
+              PitchService.getDistance(a.state.position, restart.position) -
+              PitchService.getDistance(b.state.position, restart.position),
+          )[0]?.player;
+        if (receiver) restart.receiverIds = [receiver.id];
+      }
+      this.positionTeamForKickOff(
+        attackingTeam,
+        attackingState,
+        attackingDirection,
+        restart.position,
+        true,
+        restart.receiverIds?.[0],
+      );
+      this.positionTeamForKickOff(
+        defendingTeam,
+        defendingState,
+        defendingDirection,
+        restart.position,
+        false,
+        undefined,
+      );
+      return;
+    }
+
+    if (restart.type === "THROW_IN" && !restart.takerId) {
+      const taker = this.selectThrowInTaker(attackingTeam);
+      if (!taker) {
+        throw new Error(
+          `${attackingTeam.name} has no valid taker for throw_in`,
+        );
+      }
+      restart.takerId = taker.id;
+    }
+
+    if (restart.type === "CORNER") {
+      this.positionCornerAttackers(
+        attackingTeam,
+        attackingState,
+        attackingDirection,
+        restart,
+      );
+      this.positionCornerDefenders(
+        defendingTeam,
+        defendingState,
+        defendingDirection,
+        restart,
+      );
+      return;
+    }
+
+    this.positionPlayersForThrowIn(
+      attackingTeam,
+      attackingState,
+      defendingTeam,
+      defendingState,
+      attackingDirection,
+      defendingDirection,
+      restart,
+    );
+  }
+
+  private positionTeamForKickOff(
+    team: Team,
+    teamState: MatchState["homeTeamState"],
+    direction: PlayingDirection,
+    center: Vector2D,
+    isKickingOff: boolean,
+    receiverId: string | undefined,
+  ): void {
+    const takerId = team.tactics.setPieceTakerId;
+
+    for (const player of team.players) {
+      const state = teamState.playerStates[player.id];
+      if (!state) continue;
+
+      let target = this.getOwnHalfPosition(
+        state.position,
+        direction,
+        isKickingOff ? 1 : 9.5,
+      );
+      if (isKickingOff && player.id === takerId) {
+        target = center;
+      } else if (isKickingOff && player.id === receiverId) {
+        target = {
+          x: center.x + (direction === "LEFT_TO_RIGHT" ? -4 : 4),
+          y: center.y,
+        };
+      }
+
+      this.setRestartTarget(state, target);
+    }
+  }
+
+  private positionCornerAttackers(
+    team: Team,
+    teamState: MatchState["homeTeamState"],
+    direction: PlayingDirection,
+    restart: SetPieceRestart,
+  ): void {
+    const takerId = team.tactics.setPieceTakerId;
+    const outfieldPlayers = team.players.filter(
+      (player) => player.position !== "GK" && player.id !== takerId,
+    );
+    const priority = (position: Player["position"]): number => {
+      if (position === "ST") return 0;
+      if (
+        position === "AM" ||
+        position === "LAM" ||
+        position === "RAM" ||
+        position === "LW" ||
+        position === "RW"
+      ) return 1;
+      if (position === "CM") return 2;
+      if (position === "DM") return 3;
+      return 4;
+    };
+    const attackers = [...outfieldPlayers]
+      .sort((a, b) => priority(a.position) - priority(b.position))
+      .slice(0, team.tactics.cornerAttackersInBox ?? 6);
+    const attackerIds = new Set(attackers.map((player) => player.id));
+    const sign = direction === "LEFT_TO_RIGHT" ? 1 : -1;
+    const goalX = restart.position.x;
+    const boxYCenter = PITCH_DIMENSIONS.width / 2;
+    const laneOffsets = [-8, 0, 8, -16, 16, -12, 12, -4, 4];
+
+    attackers.forEach((player, index) => {
+      const state = teamState.playerStates[player.id];
+      if (!state) return;
+      const laneOffset = laneOffsets[index % laneOffsets.length] ?? 0;
+      this.setRestartTarget(state, {
+        x: goalX - sign * (6 + Math.floor(index / 3) * 5),
+        y: Math.max(4, Math.min(
+          PITCH_DIMENSIONS.width - 4,
+          boxYCenter + laneOffset,
+        )),
+      });
+    });
+
+    for (const player of team.players) {
+      const state = teamState.playerStates[player.id];
+      if (!state) continue;
+      if (player.id === takerId) {
+        this.setRestartTarget(state, restart.position);
+      } else if (player.position === "GK") {
+        this.setRestartTarget(state, this.getOwnGoalPosition(direction));
+      } else if (!attackerIds.has(player.id)) {
+        const keepBackX = goalX - sign * 24;
+        this.setRestartTarget(state, {
+          x: keepBackX,
+          y: Math.max(5, Math.min(
+            PITCH_DIMENSIONS.width - 5,
+            state.position.y,
+          )),
+        });
+      }
+    }
+  }
+
+  private positionCornerDefenders(
+    team: Team,
+    teamState: MatchState["homeTeamState"],
+    direction: PlayingDirection,
+    restart: SetPieceRestart,
+  ): void {
+    const sign = direction === "LEFT_TO_RIGHT" ? 1 : -1;
+    const goalX =
+      direction === "LEFT_TO_RIGHT" ? 0 : PITCH_DIMENSIONS.length;
+    const defenders = team.players
+      .filter((player) => player.position !== "GK")
+      .sort((a, b) => {
+        const aPriority =
+          a.position === "CB" ? 0 : a.position === "LB" || a.position === "RB" ? 1 : 2;
+        const bPriority =
+          b.position === "CB" ? 0 : b.position === "LB" || b.position === "RB" ? 1 : 2;
+        return aPriority - bPriority;
+      });
+
+    defenders.forEach((player, index) => {
+      const state = teamState.playerStates[player.id];
+      if (!state) return;
+      const nearBox = index < 6;
+      this.setRestartTarget(state, {
+        x: goalX + sign * (nearBox ? 8 + Math.floor(index / 3) * 5 : 20),
+        y: Math.max(
+          4,
+          Math.min(PITCH_DIMENSIONS.width - 4, 8 + (index % 6) * 13),
+        ),
+      });
+    });
+
+    const goalkeeper = team.players.find(
+      (player) => player.position === "GK",
+    );
+    const goalkeeperState = goalkeeper
+      ? teamState.playerStates[goalkeeper.id]
+      : undefined;
+    if (goalkeeperState) {
+      this.setRestartTarget(
+        goalkeeperState,
+        this.getOwnGoalPosition(direction),
+      );
+    }
+  }
+
+  private positionPlayersForThrowIn(
+    attackingTeam: Team,
+    attackingState: MatchState["homeTeamState"],
+    defendingTeam: Team,
+    defendingState: MatchState["homeTeamState"],
+    attackingDirection: PlayingDirection,
+    defendingDirection: PlayingDirection,
+    restart: SetPieceRestart,
+  ): void {
+    const takerId = restart.takerId ?? attackingTeam.tactics.setPieceTakerId;
+    if (!restart.receiverIds?.length) {
+      const nearestTeammates = attackingTeam.players
+        .filter((player) => player.id !== takerId && player.position !== "GK")
+        .map((player) => ({
+          player,
+          state: attackingState.playerStates[player.id],
+        }))
+        .filter(
+          (entry): entry is { player: Player; state: PlayerMatchState } =>
+            entry.state !== undefined,
+        )
+        .sort(
+          (a, b) =>
+            PitchService.getDistance(a.state.position, restart.position) -
+            PitchService.getDistance(b.state.position, restart.position),
+        );
+      restart.receiverIds = nearestTeammates
+        .slice(0, 2)
+        .map(({ player }) => player.id);
+    }
+    const receiverIds = new Set(restart.receiverIds);
+
+    attackingTeam.players.forEach((player, index) => {
+      const state = attackingState.playerStates[player.id];
+      if (!state) return;
+      if (player.id === takerId) {
+        this.setRestartTarget(state, restart.position);
+      } else if (receiverIds.has(player.id)) {
+        this.setRestartTarget(state, {
+          x: restart.position.x,
+          y: Math.max(2, Math.min(
+            PITCH_DIMENSIONS.width - 2,
+            restart.position.y + (index % 2 === 0 ? 5 : -5),
+          )),
+        });
+      } else if (player.position === "GK") {
+        this.setRestartTarget(
+          state,
+          this.getOwnGoalPosition(attackingDirection),
+        );
+      } else {
+        this.setRestartTarget(state, state.position);
+      }
+    });
+
+    const opponent = defendingTeam.players
+      .filter((player) => player.position !== "GK")
+      .map((player) => ({
+        player,
+        state: defendingState.playerStates[player.id],
+      }))
+      .filter(
+        (entry): entry is { player: Player; state: PlayerMatchState } =>
+          entry.state !== undefined,
+      )
+      .sort(
+        (a, b) =>
+          PitchService.getDistance(a.state.position, restart.position) -
+          PitchService.getDistance(b.state.position, restart.position),
+      );
+    opponent.forEach(({ state }, index) => {
+      if (index === 0) {
+        const side = restart.position.y <= PITCH_DIMENSIONS.width / 2 ? 1 : -1;
+        this.setRestartTarget(state, {
+          x: restart.position.x,
+          y: restart.position.y + side * 3,
+        });
+      } else {
+        this.setRestartTarget(state, state.position);
+      }
+    });
+    const defendingGoalkeeper = defendingTeam.players.find(
+      (player) => player.position === "GK",
+    );
+    const defendingGoalkeeperState = defendingGoalkeeper
+      ? defendingState.playerStates[defendingGoalkeeper.id]
+      : undefined;
+    if (defendingGoalkeeperState) {
+      this.setRestartTarget(
+        defendingGoalkeeperState,
+        this.getOwnGoalPosition(defendingDirection),
+      );
+    }
+  }
+
+  private getOwnHalfPosition(
+    position: Vector2D,
+    direction: PlayingDirection,
+    margin: number,
+  ): Vector2D {
+    const center = PITCH_DIMENSIONS.length / 2;
+    return {
+      x: direction === "LEFT_TO_RIGHT"
+        ? Math.min(position.x, center - margin)
+        : Math.max(position.x, center + margin),
+      y: Math.max(0, Math.min(PITCH_DIMENSIONS.width, position.y)),
+    };
+  }
+
+  private getOwnGoalPosition(direction: PlayingDirection): Vector2D {
+    return {
+      x: direction === "LEFT_TO_RIGHT" ? 5 : PITCH_DIMENSIONS.length - 5,
+      y: PITCH_DIMENSIONS.width / 2,
+    };
+  }
+
+  private setRestartTarget(
+    state: PlayerMatchState,
+    target: Vector2D,
+  ): void {
+    state.targetPosition = PitchService.clampPosition(target);
+    state.currentAction = "MOVING";
+  }
+
+  private isRestartSetupComplete(
+    match: MatchState,
+    restart: SetPieceRestart,
+  ): boolean {
+    const teamStates = [
+      match.homeTeamState.playerStates,
+      match.awayTeamState.playerStates,
+    ];
+    const tolerance = 1.5;
+    return teamStates.every((states) =>
+      Object.values(states).every(
+        (state) =>
+          PitchService.getDistance(
+            state.position,
+            state.targetPosition ?? state.position,
+          ) <= tolerance &&
+          Math.hypot(state.velocity.x, state.velocity.y) <= 0.4,
+      ),
+    );
+  }
+
+  private selectThrowInTaker(team: Team): Player | undefined {
+    const fullbacks = team.players.filter(
+      (player) => player.position === "LB" || player.position === "RB",
+    );
+    const fallback = team.players.find(
+      (player) => player.id === team.tactics.setPieceTakerId,
+    );
+    if (fullbacks.length === 0) return fallback;
+
+    return fullbacks[Math.floor(this.random() * fullbacks.length)];
   }
 
   private resetBall(match: MatchState): void {
@@ -1516,6 +2231,8 @@ export class MatchActionService {
     match.ball.spin = 0;
     match.ball.possessionPlayerId = null;
     match.ball.possessionTeamId = null;
+    match.ball.lastTouchTeamId = null;
+    match.restart = null;
   }
 
   private updatePossessionFlags(match: MatchState): void {

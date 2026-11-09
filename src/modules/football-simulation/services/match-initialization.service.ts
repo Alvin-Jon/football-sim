@@ -30,6 +30,23 @@ export class MatchInitializationService {
       );
     }
 
+    if (!team.players.some((player) => player.id === team.tactics.setPieceTakerId)) {
+      throw new Error(
+        `${team.name} set-piece taker must be one of its players`,
+      );
+    }
+
+    const cornerAttackersInBox = team.tactics.cornerAttackersInBox ?? 6;
+    if (
+      !Number.isInteger(cornerAttackersInBox) ||
+      cornerAttackersInBox < 1 ||
+      cornerAttackersInBox > 9
+    ) {
+      throw new Error(
+        `${team.name} corner attackers in the box must be an integer from 1 to 9`,
+      );
+    }
+
     const playerIds = new Set(
       team.players.map((player) => player.id),
     );
@@ -189,7 +206,9 @@ export class MatchInitializationService {
         spin: 0,
         possessionTeamId: null,
         possessionPlayerId: null,
+        lastTouchTeamId: null,
       },
+      restart: null,
       statistics,
     };
   }

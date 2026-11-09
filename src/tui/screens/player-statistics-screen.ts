@@ -155,6 +155,24 @@ this.awayPanel.key(["down", "j"], () => {
       tacklesWon: 0,
       interceptions: 0,
       saves: 0,
+      passBreakdown: {
+        SHORT:{
+          attempted: 0,
+          completed: 0,
+        },
+        LONG: {
+          attempted: 0,
+          completed: 0,
+        },
+        THROUGH: {
+          attempted: 0,
+          completed: 0,
+        },
+        CROSS: {
+          attempted: 0,
+          completed: 0,
+        },
+      }
     };
   }
 
