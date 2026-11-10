@@ -15,4 +15,10 @@ export interface TacticalModifiers {
   readonly dribbleBias: number;
   readonly holdBias: number;
   readonly crossBias: number;
+  readonly passLaneWeight: number;
+  readonly passPressureWeight: number;
+  readonly passProgressionWeight: number;
+  readonly passMinCompletion: number;
+  readonly passRecycleBias: number;
+  readonly passTurnoverCost: number;
 }

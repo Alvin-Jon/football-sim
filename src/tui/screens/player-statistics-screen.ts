@@ -1,7 +1,7 @@
 import blessed from "blessed";
 
 import type { MatchInitializationService } from "../../modules/football-simulation/services/match-initialization.service.js";
-import type { PlayerMatchStatistics } from "../../modules/football-simulation/types/statistics.types.js";
+import { createPlayerStatistics } from "../../modules/football-simulation/types/statistics.types.js";
 
 type Match = ReturnType<typeof MatchInitializationService.initialize>;
 
@@ -143,37 +143,8 @@ this.awayPanel.key(["down", "j"], () => {
     ].join("\n");
   }
 
-  private emptyStats(): PlayerMatchStatistics {
-    return {
-      passesAttempted: 0,
-      passesCompleted: 0,
-      shots: 0,
-      shotsOnTarget: 0,
-      goals: 0,
-      assists: 0,
-      tacklesAttempted: 0,
-      tacklesWon: 0,
-      interceptions: 0,
-      saves: 0,
-      passBreakdown: {
-        SHORT:{
-          attempted: 0,
-          completed: 0,
-        },
-        LONG: {
-          attempted: 0,
-          completed: 0,
-        },
-        THROUGH: {
-          attempted: 0,
-          completed: 0,
-        },
-        CROSS: {
-          attempted: 0,
-          completed: 0,
-        },
-      }
-    };
+  private emptyStats() {
+    return createPlayerStatistics();
   }
 
   private pad(value: string, width: number): string {

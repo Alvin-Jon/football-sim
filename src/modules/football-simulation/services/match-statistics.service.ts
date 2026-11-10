@@ -1,9 +1,20 @@
 import type { MatchState } from "../types/match.types.js";
 import type {
+  DuelKind,
+  DuelResultKind,
   PassBreakdown,
   PassKind,
   PassTypeStats,
 } from "../types/statistics.types.js";
+
+export interface DuelRecord {
+  tacklerTeamId: string;
+  tacklerId: string;
+  carrierTeamId: string;
+  carrierId: string;
+  kind: DuelKind;
+  result: DuelResultKind;
+}
 
 export class MatchStatisticsService {
   static recordPossession(
@@ -120,6 +131,38 @@ export class MatchStatisticsService {
       if (successful) {
         player.tacklesWon++;
       }
+    }
+  }
+
+  /**
+   * Records the detail of a tackle duel from both sides. Call it right
+   * after recordTackle (which keeps counting attempts and clean wins).
+   */
+  static recordDuel(match: MatchState, duel: DuelRecord): void {
+    const tacklerTeam = this.getTeamStatistics(match, duel.tacklerTeamId);
+    const tacklerPlayer = match.statistics.players[duel.tacklerId];
+    const carrierTeam = this.getTeamStatistics(match, duel.carrierTeamId);
+    const carrierPlayer = match.statistics.players[duel.carrierId];
+
+    // Tackler's side.
+    if (duel.result === "LOOSE") {
+      tacklerTeam.tacklesLoose++;
+      if (tacklerPlayer) tacklerPlayer.tacklesLoose++;
+    } else if (duel.result === "BEATEN") {
+      tacklerTeam.tacklesBeaten++;
+      if (tacklerPlayer) tacklerPlayer.tacklesBeaten++;
+    }
+
+    // Carrier's side.
+    for (const holder of [carrierTeam, carrierPlayer]) {
+      if (!holder) continue;
+
+      const stats = holder.duelBreakdown[duel.kind];
+      stats.faced++;
+
+      if (duel.result === "BEATEN") stats.kept++;
+      else if (duel.result === "WON") stats.dispossessed++;
+      else stats.loose++;
     }
   }
 

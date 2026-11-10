@@ -23,6 +23,34 @@ export function createPassBreakdown(): PassBreakdown {
   };
 }
 
+// --- Tackle duels ------------------------------------------------------
+// TAKE_ON: the carrier was dribbling / moving when tackled.
+// SHIELD:  the carrier was stationary and protecting the ball.
+export type DuelKind = "TAKE_ON" | "SHIELD";
+
+// WON    - tackler took the ball cleanly.
+// LOOSE  - ball knocked free.
+// BEATEN - carrier got past the tackler and kept the ball.
+export type DuelResultKind = "WON" | "LOOSE" | "BEATEN";
+
+export const DUEL_KINDS: readonly DuelKind[] = ["TAKE_ON", "SHIELD"];
+
+// Seen from the CARRIER's side.
+export interface CarrierDuelStats {
+  faced: number; // tackles attempted against him
+  kept: number; // he beat the tackler and kept the ball
+  dispossessed: number; // tackler won it cleanly
+  loose: number; // ball knocked free
+}
+export type DuelBreakdown = Record<DuelKind, CarrierDuelStats>;
+
+export function createDuelBreakdown(): DuelBreakdown {
+  return {
+    TAKE_ON: { faced: 0, kept: 0, dispossessed: 0, loose: 0 },
+    SHIELD: { faced: 0, kept: 0, dispossessed: 0, loose: 0 },
+  };
+}
+
 export interface TeamMatchStatistics {
   possessionSeconds: number;
 
@@ -37,6 +65,9 @@ export interface TeamMatchStatistics {
 
   tacklesAttempted: number;
   tacklesWon: number;
+  tacklesLoose: number;
+  tacklesBeaten: number;
+  duelBreakdown: DuelBreakdown;
 
   interceptions: number;
   saves: number;
@@ -54,6 +85,9 @@ export interface PlayerMatchStatistics {
 
   tacklesAttempted: number;
   tacklesWon: number;
+  tacklesLoose: number;
+  tacklesBeaten: number;
+  duelBreakdown: DuelBreakdown;
 
   interceptions: number;
   saves: number;
@@ -81,6 +115,9 @@ export function createTeamStatistics(): TeamMatchStatistics {
 
     tacklesAttempted: 0,
     tacklesWon: 0,
+    tacklesLoose: 0,
+    tacklesBeaten: 0,
+    duelBreakdown: createDuelBreakdown(),
 
     interceptions: 0,
     saves: 0,
@@ -100,6 +137,9 @@ export function createPlayerStatistics(): PlayerMatchStatistics {
 
     tacklesAttempted: 0,
     tacklesWon: 0,
+    tacklesLoose: 0,
+    tacklesBeaten: 0,
+    duelBreakdown: createDuelBreakdown(),
 
     interceptions: 0,
     saves: 0,

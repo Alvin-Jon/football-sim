@@ -19,6 +19,8 @@ import type { PlayerMatchState } from "../types/player-state.types.js";
 import type { Team } from "../types/team.types.js";
 import type { TeamMatchState } from "../types/team-state.types.js";
 import { debugLog } from "../utils/debug-log.js";
+import { calculatePressure } from "../utils/pressure.utils.js";
+import { DUEL_CONSTANTS } from "../constants/duel.constants.js";
 import { PITCH_DIMENSIONS } from "../constants/pitch.constants.js";
 import { ActionEngineService } from "./action-engine.service.js";
 import { BallInteractionService } from "./ball-interaction.service.js";
@@ -43,6 +45,8 @@ import { MatchStatisticsService } from "./match-statistics.service.js";
 import type { PassKind } from "../types/statistics.types.js";
 import { FormationPositioningService } from "./formation-positioning.service.js";
 import { TacticsService } from "./tactics.service.js";
+import { TackleDuelService } from "./tackle-duel.service.js";
+import type { DuelOutcome } from "./tackle-duel.service.js";
 
 
 interface PendingPass {
@@ -93,7 +97,7 @@ export class MatchActionService {
   private static readonly POSSESSION_SHIELD_TICKS = 20;
   private static readonly MIN_HOLD_TICKS = 60;
   private static readonly PRESSURE_HOLD_TICKS = 10;
-  private static readonly PRESSURE_DISTANCE = 4;
+  private static readonly MIN_HOLD_FLOOR_TICKS = 6;
   private static readonly SHOT_ERROR_BASE = 0.3;
   private static readonly SHOT_ERROR_PER_METRE = 0.015;
   private static readonly SHOT_ERROR_UNSKILLED = 0.2;
@@ -129,6 +133,7 @@ export class MatchActionService {
   private readonly goalkeeperDistribution = new GoalkeeperDistributionService();
 
   private readonly goalkeeperSave: GoalkeeperSaveService;
+  private readonly tackleDuel: TackleDuelService;
   private readonly goalkeeperSaveExecution = new GoalkeeperSaveExecutionService(
     this.ballInteraction,
   );
@@ -154,6 +159,7 @@ export class MatchActionService {
     this.receiving = new ReceivingService(this.ballInteraction, random);
     this.shooting = new ShootingService(this.ballInteraction, random);
     this.goalkeeperSave = new GoalkeeperSaveService(random);
+    this.tackleDuel = new TackleDuelService(random);
     this.interception = new InterceptionService(
       this.ballInteraction,
       this.trajectory,
@@ -284,24 +290,30 @@ export class MatchActionService {
     const started = this.possessionStarts.get(playerId);
     if (started === undefined) return false;
 
-    const nearestOpponent = context.opponents.reduce(
-      (nearest, opponent) =>
-        Math.min(
-          nearest,
-          PitchService.getDistance(
-            context.player.state.position,
-            opponent.state.position,
-          ),
-        ),
-      Infinity,
+    return match.tick - started < this.getHoldTicks(context);
+  }
+
+  private getHoldTicks(context: DecisionContext): number {
+    const pressure = calculatePressure(
+      context.player.state.position,
+      context.opponents,
     );
 
-    const holdTicks =
-      nearestOpponent < MatchActionService.PRESSURE_DISTANCE
-        ? MatchActionService.PRESSURE_HOLD_TICKS
-        : TacticsService.scaleHoldTicks(MatchActionService.MIN_HOLD_TICKS, context.tactics);
+    const relaxed = TacticsService.scaleHoldTicks(
+      MatchActionService.MIN_HOLD_TICKS,
+      context.tactics,
+    );
 
-    return match.tick - started < holdTicks;
+    const blended =
+      relaxed * (1 - pressure) +
+      MatchActionService.PRESSURE_HOLD_TICKS * pressure;
+    const calm =
+      0.85 + (0.3 * context.player.player.attributes.composure) / 20;
+
+    return Math.max(
+      MatchActionService.MIN_HOLD_FLOOR_TICKS,
+      Math.round(blended * calm),
+    );
   }
 
   // Carry the ball forward a few metres while waiting to release it.
@@ -922,7 +934,7 @@ export class MatchActionService {
           this.carryBall(player, state, context);
           return;
         }
-        this.executePass(match, team, teamState, player, state, decision);
+        this.executePass(match, team, teamState, player, state, context, decision);
         return;
 
       case "CROSS":
@@ -975,6 +987,7 @@ export class MatchActionService {
     teamState: TeamMatchState,
     player: Player,
     state: PlayerMatchState,
+    context: DecisionContext,
     decision: DecisionResult,
   ): void {
     if (!decision.targetPosition) return;
@@ -996,6 +1009,7 @@ export class MatchActionService {
       {
         type: passType,
         targetPosition: decision.targetPosition,
+        pressure: calculatePressure(state.position, context.opponents),
         ...(decision.targetPlayerId && {
           targetPlayerId: decision.targetPlayerId,
         }),
@@ -1056,6 +1070,7 @@ export class MatchActionService {
       {
         type: "LONG",
         targetPosition,
+        pressure: calculatePressure(state.position, context.opponents),
         ...(receiver && { targetPlayerId: receiver.player.id }),
       },
       receiver?.state,
@@ -1272,34 +1287,100 @@ export class MatchActionService {
       match.tick + MatchActionService.TACKLE_COOLDOWN_TICKS,
     );
 
-    const hardTackle = decision.action === "HARD_TACKLE";
-    const chance = Math.max(
-      0.1,
-      Math.min(
-        0.9,
-        0.3 +
-          player.attributes.tackling * 0.025 +
-          player.attributes.anticipation * 0.01 -
-          carrier.player.attributes.ballControl * 0.01 +
-          (hardTackle ? 0.08 : 0),
-      ),
-    );
     state.currentAction = "TACKLING";
 
-    const successful = this.random() <= chance;
+    const outcome = this.tackleDuel.resolve({
+      tackler: player,
+      tacklerState: state,
+      carrier: carrier.player,
+      carrierState: carrier.state,
+      hardTackle: decision.action === "HARD_TACKLE",
+    });
 
-    if (successful) {
-      this.ballInteraction.assignPossession(player.id, teamId, match.ball);
-      this.ballInteraction.updateControlledBall(state, match.ball);
-      this.grantPossessionShield(match, player.id);
-    }
+    this.applyDuelOutcome(match, teamId, player, state, carrier, outcome);
+
+    debugLog(
+      `[duel] match=${match.id} tick=${match.tick} tackler=${player.name} carrier=${carrier.player.name} mode=${outcome.mode} chance=${outcome.tackleChance.toFixed(2)} clean=${outcome.cleanShare.toFixed(2)} front=${outcome.frontness.toFixed(2)} result=${outcome.result}`,
+    );
 
     MatchStatisticsService.recordTackle(
       match,
       teamId,
       player.id,
-      successful,
+      outcome.result === "WON",
     );
+    MatchStatisticsService.recordDuel(match, {
+      tacklerTeamId: teamId,
+      tacklerId: player.id,
+      carrierTeamId: this.getPlayerTeamId(match, carrier.player.id),
+      carrierId: carrier.player.id,
+      kind: outcome.mode,
+      result: outcome.result,
+    });
+  }
+
+  private applyDuelOutcome(
+    match: MatchState,
+    teamId: string,
+    player: Player,
+    state: PlayerMatchState,
+    carrier: DecisionPlayer,
+    outcome: DuelOutcome,
+  ): void {
+    const D = DUEL_CONSTANTS;
+
+    switch (outcome.result) {
+      case "WON":
+        this.ballInteraction.assignPossession(player.id, teamId, match.ball);
+        this.ballInteraction.updateControlledBall(state, match.ball);
+        this.grantPossessionShield(match, player.id);
+        this.drainStamina(carrier.state, D.STAMINA_COST_DISPOSSESSED);
+        return;
+
+      case "LOOSE": {
+        const away = Math.atan2(
+          carrier.state.position.y - state.position.y,
+          carrier.state.position.x - state.position.x,
+        );
+        const direction = away + (this.random() - 0.5) * D.LOOSE_BALL_SPREAD;
+        const speed =
+          D.LOOSE_BALL_MIN_SPEED +
+          this.random() * (D.LOOSE_BALL_MAX_SPEED - D.LOOSE_BALL_MIN_SPEED);
+
+        this.ballInteraction.deflectBall(match.ball, direction, speed);
+        match.ball.lastTouchTeamId = teamId;
+        this.lockOut(match, carrier.player.id);
+        this.drainStamina(carrier.state, D.STAMINA_COST_DISPOSSESSED);
+        return;
+      }
+
+      case "BEATEN":
+        state.currentSpeed *= D.BEATEN_SPEED_RETENTION;
+        state.velocity = {
+          x: state.velocity.x * D.BEATEN_SPEED_RETENTION,
+          y: state.velocity.y * D.BEATEN_SPEED_RETENTION,
+        };
+        this.tackleCooldowns.set(
+          player.id,
+          match.tick +
+            MatchActionService.TACKLE_COOLDOWN_TICKS +
+            D.BEATEN_EXTRA_COOLDOWN_TICKS,
+        );
+        this.possessionShields.set(
+          carrier.player.id,
+          Math.max(
+            this.possessionShields.get(carrier.player.id) ?? 0,
+            match.tick + D.BEATEN_ESCAPE_SHIELD_TICKS,
+          ),
+        );
+        this.drainStamina(carrier.state, D.STAMINA_COST_DRIBBLER_WIN);
+        this.drainStamina(state, D.STAMINA_COST_TACKLER);
+        return;
+    }
+  }
+
+  private drainStamina(state: PlayerMatchState, amount: number): void {
+    state.stamina = Math.max(0, state.stamina - amount);
   }
 
   private cancelRunningAction(

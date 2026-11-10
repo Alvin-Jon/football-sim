@@ -6,6 +6,7 @@ export interface PassOptions {
   type: PassType;
   targetPosition: Vector2D;
   targetPlayerId?: string;
+  pressure?: number;
 }
 
 export interface PassResult {

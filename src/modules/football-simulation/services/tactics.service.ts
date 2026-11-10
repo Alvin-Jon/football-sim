@@ -24,9 +24,18 @@ type AdditiveKey =
   | "shootBias"
   | "dribbleBias"
   | "holdBias"
-  | "crossBias";
+  | "crossBias"
+  | "passMinCompletion"
+  | "passRecycleBias";
 
-type MultiplicativeKey = "width" | "holdTempo" | "riskTolerance";
+type MultiplicativeKey =
+  | "width"
+  | "holdTempo"
+  | "riskTolerance"
+  | "passLaneWeight"
+  | "passPressureWeight"
+  | "passProgressionWeight"
+  | "passTurnoverCost";
 
 interface Adjustment {
   add?: Partial<Record<AdditiveKey, number>>;
@@ -64,53 +73,184 @@ export class TacticsService {
     dribbleBias: 0,
     holdBias: 0,
     crossBias: 0,
+    passLaneWeight: 1,
+    passPressureWeight: 1,
+    passProgressionWeight: 1,
+    passMinCompletion: 0.55,
+    passRecycleBias: 0,
+    passTurnoverCost: 1,
   });
 
 
   private static readonly MENTALITY: Record<TeamMentality, Adjustment> = {
     VERY_DEFENSIVE: {
-      add: { lineHeight: -8, shootBias: -6, dribbleBias: -3, holdBias: 3 },
-      mul: { riskTolerance: 0.6, holdTempo: 1.1 },
+      add: {
+        lineHeight: -8,
+        shootBias: -6,
+        dribbleBias: -3,
+        holdBias: 3,
+        passMinCompletion: 0.1,
+        passRecycleBias: 3,
+      },
+      mul: {
+        riskTolerance: 0.6,
+        holdTempo: 1.1,
+        passLaneWeight: 1.3,
+        passPressureWeight: 1.2,
+        passProgressionWeight: 0.7,
+        passTurnoverCost: 1.3,
+      },
     },
     DEFENSIVE: {
-      add: { lineHeight: -4, shootBias: -3, dribbleBias: -1, holdBias: 1.5 },
-      mul: { riskTolerance: 0.8, holdTempo: 1.05 },
+      add: {
+        lineHeight: -4,
+        shootBias: -3,
+        dribbleBias: -1,
+        holdBias: 1.5,
+        passMinCompletion: 0.05,
+        passRecycleBias: 1.5,
+      },
+      mul: {
+        riskTolerance: 0.8,
+        holdTempo: 1.05,
+        passLaneWeight: 1.15,
+        passPressureWeight: 1.1,
+        passProgressionWeight: 0.85,
+        passTurnoverCost: 1.15,
+      },
     },
     BALANCED: {},
     ATTACKING: {
-      add: { lineHeight: 4, shootBias: 4, dribbleBias: 2, holdBias: -1 },
-      mul: { riskTolerance: 1.2, holdTempo: 0.95 },
+      add: {
+        lineHeight: 4,
+        shootBias: 4,
+        dribbleBias: 2,
+        holdBias: -1,
+        passMinCompletion: -0.05,
+        passRecycleBias: -1,
+      },
+      mul: {
+        riskTolerance: 1.2,
+        holdTempo: 0.95,
+        passLaneWeight: 0.9,
+        passPressureWeight: 0.9,
+        passProgressionWeight: 1.2,
+        passTurnoverCost: 0.85,
+      },
     },
     VERY_ATTACKING: {
-      add: { lineHeight: 8, shootBias: 8, dribbleBias: 4, holdBias: -2 },
-      mul: { riskTolerance: 1.4, holdTempo: 0.9 },
+      add: {
+        lineHeight: 8,
+        shootBias: 8,
+        dribbleBias: 4,
+        holdBias: -2,
+        passMinCompletion: -0.1,
+        passRecycleBias: -2,
+      },
+      mul: {
+        riskTolerance: 1.4,
+        holdTempo: 0.9,
+        passLaneWeight: 0.8,
+        passPressureWeight: 0.8,
+        passProgressionWeight: 1.4,
+        passTurnoverCost: 0.7,
+      },
     },
   };
 
   private static readonly STYLE: Record<TeamStyle, Adjustment> = {
     POSSESSION: {
-      add: { directness: -5, dribbleBias: -1 },
-      mul: { holdTempo: 1.2, width: 1.05, riskTolerance: 0.9 },
+      add: {
+        directness: -5,
+        dribbleBias: -1,
+        passMinCompletion: 0.12,
+        passRecycleBias: 4,
+      },
+      mul: {
+        holdTempo: 1.2,
+        width: 1.05,
+        riskTolerance: 0.9,
+        passLaneWeight: 1.3,
+        passPressureWeight: 1.2,
+        passProgressionWeight: 0.7,
+        passTurnoverCost: 1.2,
+      },
     },
     TIKI_TAKA: {
-      add: { directness: -8, dribbleBias: -4, lineHeight: 2 },
-      mul: { holdTempo: 0.85, width: 0.9, riskTolerance: 0.85 },
+      add: {
+        directness: -8,
+        dribbleBias: -4,
+        lineHeight: 2,
+        passMinCompletion: 0.15,
+        passRecycleBias: 5,
+      },
+      mul: {
+        holdTempo: 0.85,
+        width: 0.9,
+        riskTolerance: 0.85,
+        passLaneWeight: 1.2,
+        passPressureWeight: 1,
+        passProgressionWeight: 0.65,
+        passTurnoverCost: 1.1,
+      },
     },
     GEGENPRESS: {
-      add: { directness: 3, lineHeight: 3 },
-      mul: { holdTempo: 0.8, riskTolerance: 1.1 },
+      add: {
+        directness: 3,
+        lineHeight: 3,
+        passMinCompletion: -0.03,
+        passRecycleBias: -1,
+      },
+      mul: {
+        holdTempo: 0.8,
+        riskTolerance: 1.1,
+        passLaneWeight: 0.9,
+        passPressureWeight: 0.9,
+        passProgressionWeight: 1.3,
+        passTurnoverCost: 0.9,
+      },
     },
     COUNTER_ATTACKING: {
-      add: { directness: 8, lineHeight: -3, shootBias: 2 },
-      mul: { holdTempo: 0.7, riskTolerance: 1.1 },
+      add: {
+        directness: 8,
+        lineHeight: -3,
+        shootBias: 2,
+        passMinCompletion: -0.15,
+        passRecycleBias: -2,
+      },
+      mul: {
+        holdTempo: 0.7,
+        riskTolerance: 1.1,
+        passLaneWeight: 0.75,
+        passPressureWeight: 0.8,
+        passProgressionWeight: 1.5,
+        passTurnoverCost: 0.8,
+      },
     },
     DIRECT: {
-      add: { directness: 10, crossBias: 3 },
-      mul: { holdTempo: 0.75, riskTolerance: 1.15 },
+      add: {
+        directness: 10,
+        crossBias: 3,
+        passMinCompletion: -0.17,
+        passRecycleBias: -3,
+      },
+      mul: {
+        holdTempo: 0.75,
+        riskTolerance: 1.15,
+        passLaneWeight: 0.7,
+        passPressureWeight: 0.75,
+        passProgressionWeight: 1.4,
+        passTurnoverCost: 0.75,
+      },
     },
     WING_PLAY: {
-      add: { directness: 2, crossBias: 8, dribbleBias: 3 },
-      mul: { width: 1.2 },
+      add: {
+        directness: 2,
+        crossBias: 8,
+        dribbleBias: 3,
+        passMinCompletion: -0.03,
+      },
+      mul: { width: 1.2, passProgressionWeight: 1.1 },
     },
   };
 
@@ -237,6 +377,27 @@ export class TacticsService {
     modifiers.width = this.clamp(modifiers.width, 0.8, 1.25);
     modifiers.holdTempo = this.clamp(modifiers.holdTempo, 0.5, 1.5);
     modifiers.riskTolerance = this.clamp(modifiers.riskTolerance, 0.4, 1.6);
+    modifiers.passLaneWeight = this.clamp(modifiers.passLaneWeight, 0.5, 1.6);
+    modifiers.passPressureWeight = this.clamp(
+      modifiers.passPressureWeight,
+      0.5,
+      1.5,
+    );
+    modifiers.passProgressionWeight = this.clamp(
+      modifiers.passProgressionWeight,
+      0.5,
+      1.8,
+    );
+    modifiers.passTurnoverCost = this.clamp(
+      modifiers.passTurnoverCost,
+      0.6,
+      1.6,
+    );
+    modifiers.passMinCompletion = this.clamp(
+      modifiers.passMinCompletion,
+      0.2,
+      0.85,
+    );
 
     const resolved: ResolvedTactics = {
       pressing,

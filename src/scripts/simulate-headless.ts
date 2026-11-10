@@ -2,8 +2,16 @@ import { MatchInitializationService } from "../modules/football-simulation/servi
 import { MatchEngineService } from "../modules/football-simulation/services/match-engine.service.js";
 import { PositionInfluenceService } from "../modules/football-simulation/services/position-influence.service.js";
 import { MatchStatisticsService } from "../modules/football-simulation/services/match-statistics.service.js";
-import { PASS_KINDS } from "../modules/football-simulation/types/statistics.types.js";
-import type { PassKind } from "../modules/football-simulation/types/statistics.types.js";
+import {
+  DUEL_KINDS,
+  PASS_KINDS,
+} from "../modules/football-simulation/types/statistics.types.js";
+import type {
+  CarrierDuelStats,
+  DuelKind,
+  DuelBreakdown,
+  PassKind,
+} from "../modules/football-simulation/types/statistics.types.js";
 import { BAYVIEW, MANFIELD } from "../db/teams/index.js";
 
 const MATCHES = Number(process.argv[2] ?? 3);
@@ -34,8 +42,12 @@ interface Totals {
   shots: number;
   goals: number;
   tacklesAttempted: number;
+  tacklesWon: number;
+  tacklesLoose: number;
+  tacklesBeaten: number;
   interceptions: number;
   kinds: Record<PassKind, { attempted: number; completed: number }>;
+  duels: Record<DuelKind, CarrierDuelStats>;
 }
 
 const emptyKinds = () => ({
@@ -45,6 +57,11 @@ const emptyKinds = () => ({
   CROSS: { attempted: 0, completed: 0 },
 });
 
+const emptyDuels = (): Record<DuelKind, CarrierDuelStats> => ({
+  TAKE_ON: { faced: 0, kept: 0, dispossessed: 0, loose: 0 },
+  SHIELD: { faced: 0, kept: 0, dispossessed: 0, loose: 0 },
+});
+
 const empty = (): Totals => ({
   players: 0,
   passesAttempted: 0,
@@ -52,12 +69,33 @@ const empty = (): Totals => ({
   shots: 0,
   goals: 0,
   tacklesAttempted: 0,
+  tacklesWon: 0,
+  tacklesLoose: 0,
+  tacklesBeaten: 0,
   interceptions: 0,
   kinds: emptyKinds(),
+  duels: emptyDuels(),
 });
+
+const pct = (part: number, whole: number): string =>
+  whole === 0 ? "-" : `${Math.round((part / whole) * 100)}%`;
+
+const sumDuels = (breakdown: DuelBreakdown): CarrierDuelStats => {
+  const total = { faced: 0, kept: 0, dispossessed: 0, loose: 0 };
+  for (const kind of DUEL_KINDS) {
+    total.faced += breakdown[kind].faced;
+    total.kept += breakdown[kind].kept;
+    total.dispossessed += breakdown[kind].dispossessed;
+    total.loose += breakdown[kind].loose;
+  }
+  return total;
+};
 
 const byRole = new Map<string, Totals>();
 const matchRows: Record<string, number | string>[] = [];
+
+// Whole-run totals (every outfield player, both teams).
+const overall = empty();
 
 function playMatch(index: number): Match {
   const engine = new MatchEngineService(
@@ -87,6 +125,33 @@ function playMatch(index: number): Match {
   return engine.finishMatch(match);
 }
 
+function add(totals: Totals, stats: Match["statistics"]["players"][string]): void {
+  totals.players++;
+  totals.passesAttempted += stats.passesAttempted;
+  totals.passesCompleted += stats.passesCompleted;
+  totals.shots += stats.shots;
+  totals.goals += stats.goals;
+  totals.tacklesAttempted += stats.tacklesAttempted;
+  totals.tacklesWon += stats.tacklesWon;
+  totals.tacklesLoose += stats.tacklesLoose;
+  totals.tacklesBeaten += stats.tacklesBeaten;
+  totals.interceptions += stats.interceptions;
+
+  for (const kind of PASS_KINDS) {
+    const typed = MatchStatisticsService.getPassTypeStats(stats, kind);
+    totals.kinds[kind].attempted += typed.attempted;
+    totals.kinds[kind].completed += typed.completed;
+  }
+
+  for (const kind of DUEL_KINDS) {
+    const duel = stats.duelBreakdown[kind];
+    totals.duels[kind].faced += duel.faced;
+    totals.duels[kind].kept += duel.kept;
+    totals.duels[kind].dispossessed += duel.dispossessed;
+    totals.duels[kind].loose += duel.loose;
+  }
+}
+
 function collect(match: Match): void {
   for (const team of [match.homeTeam, match.awayTeam]) {
     for (const player of team.players) {
@@ -98,19 +163,8 @@ function collect(match: Match): void {
       const role = PositionInfluenceService.getRole(player.position);
       const totals = byRole.get(role) ?? empty();
 
-      totals.players++;
-      totals.passesAttempted += stats.passesAttempted;
-      totals.passesCompleted += stats.passesCompleted;
-      totals.shots += stats.shots;
-      totals.goals += stats.goals;
-      totals.tacklesAttempted += stats.tacklesAttempted;
-      totals.interceptions += stats.interceptions;
-
-      for (const kind of PASS_KINDS) {
-        const typed = MatchStatisticsService.getPassTypeStats(stats, kind);
-        totals.kinds[kind].attempted += typed.attempted;
-        totals.kinds[kind].completed += typed.completed;
-      }
+      add(totals, stats);
+      add(overall, stats);
 
       byRole.set(role, totals);
     }
@@ -125,6 +179,8 @@ for (let index = 0; index < MATCHES; index++) {
   collect(match);
 
   const { home, away } = match.statistics;
+  const homeDuels = sumDuels(home.duelBreakdown);
+  const awayDuels = sumDuels(away.duelBreakdown);
 
   matchRows.push({
     match: index + 1,
@@ -133,10 +189,13 @@ for (let index = 0; index < MATCHES; index++) {
     shots: `${home.shots}-${away.shots}`,
     onTarget: `${home.shotsOnTarget}-${away.shotsOnTarget}`,
     passes: `${home.passesAttempted}-${away.passesAttempted}`,
-    accuracy:
-      `${Math.round((home.passesCompleted / Math.max(1, home.passesAttempted)) * 100)}%-` +
-      `${Math.round((away.passesCompleted / Math.max(1, away.passesAttempted)) * 100)}%`,
+    accuracy: `${pct(home.passesCompleted, home.passesAttempted)}-${pct(away.passesCompleted, away.passesAttempted)}`,
+    // Interceptions are credited to the DEFENDING team.
+    interceptions: `${home.interceptions}-${away.interceptions}`,
+    // Tackles made by each team.
     tackles: `${home.tacklesAttempted}-${away.tacklesAttempted}`,
+    // Duels each team's carriers faced, and how many they kept.
+    dribblesKept: `${homeDuels.kept}/${homeDuels.faced}-${awayDuels.kept}/${awayDuels.faced}`,
     saves: `${home.saves}-${away.saves}`,
     seconds,
   });
@@ -153,7 +212,7 @@ console.table(
     role,
     players: t.players,
     "passes/player": Math.round(t.passesAttempted / t.players),
-    "pass %": `${Math.round((t.passesCompleted / Math.max(1, t.passesAttempted)) * 100)}%`,
+    "pass %": pct(t.passesCompleted, t.passesAttempted),
     "shots/player": (t.shots / t.players).toFixed(1),
     "goals/player": (t.goals / t.players).toFixed(2),
     "tackles/player": (t.tacklesAttempted / t.players).toFixed(1),
@@ -168,11 +227,64 @@ console.table(
 
     for (const kind of PASS_KINDS) {
       const { attempted, completed } = t.kinds[kind];
-      const percent = attempted === 0 ? 0 : Math.round((completed / attempted) * 100);
-
-      row[kind] = `${(attempted / t.players).toFixed(1)} (${percent}%)`;
+      row[kind] = `${(attempted / t.players).toFixed(1)} (${pct(completed, attempted)})`;
     }
 
     return row;
   }),
+);
+
+console.log("\nINTERCEPTIONS vs PASSING");
+{
+  const attempted = overall.passesAttempted;
+  console.table([
+    {
+      "passes attempted": attempted,
+      "completed %": pct(overall.passesCompleted, attempted),
+      interceptions: overall.interceptions,
+      "interceptions per 100 passes": attempted
+        ? ((overall.interceptions / attempted) * 100).toFixed(1)
+        : "-",
+    },
+  ]);
+}
+
+console.log(
+  "\nTACKLES BY DEFENDER ROLE: per player per match, outcome split\n" +
+    "(won = clean win, loose = ball knocked free, beaten = dribbler got past)",
+);
+console.table(
+  [
+    ...[...byRole.entries()].map(([role, t]) => [role, t] as const),
+    ["ALL", overall] as const,
+  ].map(([role, t]) => ({
+    role,
+    "tackles/player": (t.tacklesAttempted / Math.max(1, t.players)).toFixed(1),
+    "won %": pct(t.tacklesWon, t.tacklesAttempted),
+    "loose %": pct(t.tacklesLoose, t.tacklesAttempted),
+    "beaten %": pct(t.tacklesBeaten, t.tacklesAttempted),
+  })),
+);
+
+console.log(
+  "\nDRIBBLE DUELS, SEEN FROM THE CARRIER: faced per player per match,\n" +
+    "kept = beat the tackler, lost = clean dispossession, loose = ball knocked free",
+);
+console.table(
+  [
+    ...[...byRole.entries()].map(([role, t]) => [role, t] as const),
+    ["ALL", overall] as const,
+  ].flatMap(([role, t]) =>
+    DUEL_KINDS.map((kind) => {
+      const d = t.duels[kind];
+      return {
+        role,
+        mode: kind,
+        "faced/player": (d.faced / Math.max(1, t.players)).toFixed(2),
+        "kept %": pct(d.kept, d.faced),
+        "lost %": pct(d.dispossessed, d.faced),
+        "loose %": pct(d.loose, d.faced),
+      };
+    }),
+  ),
 );

@@ -1,4 +1,4 @@
-import type { Player } from "../types/player.types.js";
+import type { Player, PlayerAttributes } from "../types/player.types.js";
 import type { PlayerMatchState } from "../types/player-state.types.js";
 import type { BallState } from "../types/match.types.js";
 import type {
@@ -16,6 +16,30 @@ export class ReceivingService {
     private readonly random: () => number = Math.random,
   ) {}
 
+  static estimateControlChance(
+    attributes: PlayerAttributes,
+    ballSpeed: number,
+  ): number {
+    const attributeScore =
+      attributes.ballControl *
+        RECEIVING_CONSTANTS.BALL_CONTROL_WEIGHT +
+      attributes.anticipation *
+        RECEIVING_CONSTANTS.ANTICIPATION_WEIGHT +
+      attributes.decisions *
+        RECEIVING_CONSTANTS.DECISIONS_WEIGHT +
+      attributes.composure *
+        RECEIVING_CONSTANTS.COMPOSURE_WEIGHT;
+
+    const chance =
+      RECEIVING_CONSTANTS.BASE_CONTROL_CHANCE +
+      attributeScore -
+      ballSpeed * RECEIVING_CONSTANTS.SPEED_DIFFICULTY_WEIGHT;
+
+    return Math.max(
+      RECEIVING_CONSTANTS.MIN_CONTROL_CHANCE,
+      Math.min(RECEIVING_CONSTANTS.MAX_CONTROL_CHANCE, chance),
+    );
+  }
 
 attemptReceive(
   player: Player,
@@ -85,37 +109,9 @@ attemptReceive(
     player: Player,
     ball: BallState,
   ): number {
-    const attributes = player.attributes;
-
-    const speed = Math.hypot(
-      ball.velocity.x,
-      ball.velocity.y,
-    );
-
-    const attributeScore =
-      attributes.ballControl *
-        RECEIVING_CONSTANTS.BALL_CONTROL_WEIGHT +
-      attributes.anticipation *
-        RECEIVING_CONSTANTS.ANTICIPATION_WEIGHT +
-      attributes.decisions *
-        RECEIVING_CONSTANTS.DECISIONS_WEIGHT +
-      attributes.composure *
-        RECEIVING_CONSTANTS.COMPOSURE_WEIGHT;
-
-    const speedPenalty =
-      speed * RECEIVING_CONSTANTS.SPEED_DIFFICULTY_WEIGHT;
-
-    const chance =
-      RECEIVING_CONSTANTS.BASE_CONTROL_CHANCE +
-      attributeScore -
-      speedPenalty;
-
-    return Math.max(
-      RECEIVING_CONSTANTS.MIN_CONTROL_CHANCE,
-      Math.min(
-        RECEIVING_CONSTANTS.MAX_CONTROL_CHANCE,
-        chance,
-      ),
+    return ReceivingService.estimateControlChance(
+      player.attributes,
+      Math.hypot(ball.velocity.x, ball.velocity.y),
     );
   }
 
