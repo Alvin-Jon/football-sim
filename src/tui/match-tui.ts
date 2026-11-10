@@ -171,6 +171,7 @@ export class MatchTUI {
         this.updateScoreboard(match);
         this.updatePossession(match);
         this.updateStats(match);
+        this.updateEvents(match);
         break;
 
       case "PITCH":
@@ -239,6 +240,39 @@ export class MatchTUI {
         `Tackles Won:       ${home.tacklesWon} - ${away.tacklesWon}\n` +
         `Interceptions:     ${home.interceptions} - ${away.interceptions}\n` +
         `Saves:             ${home.saves} - ${away.saves}`,
+    );
+  }
+
+  private updateEvents(match: Match): void {
+    const players = [...match.homeTeam.players, ...match.awayTeam.players];
+    const teams = [match.homeTeam, match.awayTeam];
+    const recentGoals = match.events
+      .filter((event) => event.type === "GOAL")
+      .slice(-5)
+      .reverse();
+
+    if (recentGoals.length === 0) {
+      this.events.setContent("No goals yet.");
+      return;
+    }
+
+    this.events.setContent(
+      recentGoals.map((event) => {
+        const team = teams.find((candidate) => candidate.id === event.teamId);
+        const scorer = players.find(
+          (player) => player.id === event.scorerId,
+        );
+        const assister = players.find(
+          (player) => player.id === event.assistPlayerId,
+        );
+        const time =
+          `${event.minute}:${String(event.second).padStart(2, "0")}`;
+        const assistText = assister
+          ? ` (assist: ${assister.name})`
+          : " (unassisted)";
+
+        return `${time}  GOAL - ${team?.name ?? "Unknown team"}: ${scorer?.name ?? "Unknown scorer"}${assistText}`;
+      }).join("\n"),
     );
   }
 

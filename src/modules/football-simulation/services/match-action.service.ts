@@ -91,7 +91,7 @@ export class MatchActionService {
   private static readonly RELEASE_LOCKOUT_TICKS = 10;
   private static readonly TACKLE_COOLDOWN_TICKS = 60;
   private static readonly POSSESSION_SHIELD_TICKS = 20;
-  private static readonly MIN_HOLD_TICKS = 20;
+  private static readonly MIN_HOLD_TICKS = 60;
   private static readonly PRESSURE_HOLD_TICKS = 10;
   private static readonly PRESSURE_DISTANCE = 4;
   private static readonly SHOT_ERROR_BASE = 0.3;
@@ -1465,6 +1465,7 @@ export class MatchActionService {
       return;
     }
 
+    const boundaryExit = this.getBoundaryExit(previousPosition, currentPosition);
     const crossedRight =
       previousPosition.x < PITCH_DIMENSIONS.length &&
       currentPosition.x >= PITCH_DIMENSIONS.length;
@@ -1473,7 +1474,10 @@ export class MatchActionService {
       previousPosition.x > 0 &&
       currentPosition.x <= 0;
 
-    if (crossedRight || crossedLeft) {
+    if (
+      (crossedRight || crossedLeft) &&
+      boundaryExit?.type !== "TOUCHLINE"
+    ) {
       const goalX = crossedRight ? PITCH_DIMENSIONS.length : 0;
 
       const denominator = currentPosition.x - previousPosition.x;
@@ -1541,6 +1545,16 @@ export class MatchActionService {
             MatchStatisticsService.recordAssist(match, liveShot.assistPlayerId);
           }
 
+          match.events.push({
+            type: "GOAL",
+            tick: match.tick,
+            minute: match.clock.minute,
+            second: match.clock.second,
+            teamId: scoringTeamId,
+            scorerId: liveShot?.shooterId ?? null,
+            assistPlayerId: liveShot?.assistPlayerId ?? null,
+          });
+
           this.pendingShots.delete(match.id);
           this.pendingPasses.delete(match.id);
           this.lastCompletedPasses.delete(match.id);
@@ -1559,14 +1573,23 @@ export class MatchActionService {
           };
           return;
         }
-
-        // Not from a shot: no goal. Falls through and is handled as a dead
-        // ball below.
       }
     }
 
-    const boundaryExit = this.getBoundaryExit(previousPosition, currentPosition);
     if (boundaryExit) {
+      if (boundaryExit.type === "TOUCHLINE") {
+        const inwardDirection = boundaryExit.position.y === 0 ? 1 : -1;
+        match.ball.position = {
+          ...boundaryExit.position,
+          y: boundaryExit.position.y + inwardDirection * 0.5,
+        };
+        match.ball.velocity.x *= 0.25;
+        match.ball.velocity.y = 0;
+        match.ball.height = 0;
+        match.ball.verticalVelocity = 0;
+        return;
+      }
+
       const pending = this.pendingPasses.get(match.id);
       if (pending) {
         this.logPassFailure(

@@ -67,13 +67,13 @@ export const MANFIELD: Team = {
   formation,
   color: "red",
   tactics: {
-    style: "DIRECT",
-    mentality: "VERY_DEFENSIVE",
+    style: "POSSESSION",
+    mentality: "BALANCED",
     formationFluidity: "FLUID",
     setPieceTakerId,
     cornerAttackersInBox: 6,
-    pressing: "OWN_HALF",
-    defensiveLine: "DEEP"
+    pressing: "MID_BLOCK",
+    defensiveLine: "STANDARD"
   },
 
   players,

@@ -209,6 +209,7 @@ export class MatchInitializationService {
         lastTouchTeamId: null,
       },
       restart: null,
+      events: [],
       statistics,
     };
   }

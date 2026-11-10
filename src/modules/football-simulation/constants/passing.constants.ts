@@ -18,7 +18,8 @@ export const PASSING_CONSTANTS = {
   THROUGH_BALL_MIN_SPEED: 7,
   THROUGH_BALL_MAX_SPEED: 18,
 
-  // Lofted passes: horizontal speed = distance / flight time, clamped.
+  // Lofted passes extend their flight time for longer distances to stay
+  // within the horizontal speed cap.
   LONG_PASS_MIN_SPEED: 12,
   LONG_PASS_MAX_SPEED: 28,
 

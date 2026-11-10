@@ -37,6 +37,16 @@ export interface MatchClock {
   half: 1 | 2;
 }
 
+export interface GoalMatchEvent {
+  type: "GOAL";
+  tick: number;
+  minute: number;
+  second: number;
+  teamId: string;
+  scorerId: string | null;
+  assistPlayerId: string | null;
+}
+
 export interface MatchState {
   id: string;
 
@@ -58,6 +68,8 @@ export interface MatchState {
   ball: BallState;
 
   restart: SetPieceRestart | null;
+
+  events: GoalMatchEvent[];
 
   statistics: MatchStatistics;
 }

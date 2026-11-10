@@ -19,7 +19,7 @@ import { PitchService } from "./pitch.service.js";
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 type AdditiveKey =
-  | "lineHeight"
+  | "lineHeight" // in % of pitch length while accumulating, metres once resolved
   | "directness"
   | "shootBias"
   | "dribbleBias"
@@ -39,9 +39,17 @@ interface PressingProfile {
   bonus: number;
 }
 
+export interface ResolvedTactics {
+  pressing: PressingStyle;
+  defensiveLine: DefensiveLine;
+  modifiers: TacticalModifiers;
+}
+
 export class TacticsService {
   static readonly CLOSE_PRESS_DISTANCE = 4;
+  private static readonly MAX_LINE_SHIFT_PERCENT = 12;
 
+  // Everything neutral: reproduces the behaviour from before tactics existed.
   static readonly NEUTRAL: TacticalModifiers = Object.freeze({
     lineHeight: 0,
     defensiveLineHeight: 0,
@@ -58,7 +66,7 @@ export class TacticsService {
     crossBias: 0,
   });
 
-  // Mentality: how risky the team is and how high the midfield and attack sit.
+
   private static readonly MENTALITY: Record<TeamMentality, Adjustment> = {
     VERY_DEFENSIVE: {
       add: { lineHeight: -8, shootBias: -6, dribbleBias: -3, holdBias: 3 },
@@ -79,26 +87,25 @@ export class TacticsService {
     },
   };
 
-  // Style: how the team moves the ball.
   private static readonly STYLE: Record<TeamStyle, Adjustment> = {
     POSSESSION: {
-      add: { directness: -6, dribbleBias: -1 },
+      add: { directness: -5, dribbleBias: -1 },
       mul: { holdTempo: 1.2, width: 1.05, riskTolerance: 0.9 },
     },
     TIKI_TAKA: {
-      add: { directness: -10, dribbleBias: -4, lineHeight: 2 },
+      add: { directness: -8, dribbleBias: -4, lineHeight: 2 },
       mul: { holdTempo: 0.85, width: 0.9, riskTolerance: 0.85 },
     },
     GEGENPRESS: {
-      add: { directness: 4, lineHeight: 3 },
+      add: { directness: 3, lineHeight: 3 },
       mul: { holdTempo: 0.8, riskTolerance: 1.1 },
     },
     COUNTER_ATTACKING: {
-      add: { directness: 10, lineHeight: -3, shootBias: 2 },
+      add: { directness: 8, lineHeight: -3, shootBias: 2 },
       mul: { holdTempo: 0.7, riskTolerance: 1.1 },
     },
     DIRECT: {
-      add: { directness: 12, crossBias: 3 },
+      add: { directness: 10, crossBias: 3 },
       mul: { holdTempo: 0.75, riskTolerance: 1.15 },
     },
     WING_PLAY: {
@@ -107,80 +114,168 @@ export class TacticsService {
     },
   };
 
+  // --- Pressing ---------------------------------------------------------
+
   private static readonly PRESSING: Record<PressingStyle, PressingProfile> = {
     ALL_OVER_PITCH: { maxProgress: 1.0, chasers: 3, bonus: 8 },
     MID_BLOCK: { maxProgress: 0.65, chasers: 2, bonus: 3 },
     OWN_HALF: { maxProgress: 0.5, chasers: 2, bonus: 2 },
   };
 
-  private static readonly DEFAULT_PRESSING: Record<TeamStyle, PressingStyle> = {
-    POSSESSION: "MID_BLOCK",
-    TIKI_TAKA: "ALL_OVER_PITCH",
-    GEGENPRESS: "ALL_OVER_PITCH",
-    COUNTER_ATTACKING: "OWN_HALF",
-    DIRECT: "MID_BLOCK",
-    WING_PLAY: "MID_BLOCK",
+  private static readonly PRESSING_ORDER: readonly PressingStyle[] = [
+    "OWN_HALF",
+    "MID_BLOCK",
+    "ALL_OVER_PITCH",
+  ];
+
+  private static readonly STYLE_PRESSING_LEVEL: Record<TeamStyle, number> = {
+    POSSESSION: 1,
+    TIKI_TAKA: 2,
+    GEGENPRESS: 2,
+    COUNTER_ATTACKING: 0,
+    DIRECT: 1,
+    WING_PLAY: 1,
   };
 
-  private static readonly DEFENSIVE_LINE_METRES: Record<DefensiveLine, number> =
-    {
-      VERY_DEEP: -10,
-      DEEP: -5,
-      STANDARD: 0,
-      HIGH: 5,
-      VERY_HIGH: 10,
-    };
 
-  private static readonly DEFAULT_DEFENSIVE_LINE: Record<
+  private static readonly MENTALITY_PRESSING_STEP: Record<
     TeamMentality,
-    DefensiveLine
+    number
   > = {
-    VERY_DEFENSIVE: "VERY_DEEP",
-    DEFENSIVE: "DEEP",
-    BALANCED: "STANDARD",
-    ATTACKING: "HIGH",
-    VERY_ATTACKING: "VERY_HIGH",
+    VERY_DEFENSIVE: -1,
+    DEFENSIVE: 0,
+    BALANCED: 0,
+    ATTACKING: 0,
+    VERY_ATTACKING: 1,
   };
 
-  private static readonly cache = new Map<string, TacticalModifiers>();
+  private static readonly DEFENSIVE_LINE_ORDER: readonly DefensiveLine[] = [
+    "VERY_DEEP",
+    "DEEP",
+    "STANDARD",
+    "HIGH",
+    "VERY_HIGH",
+  ];
+
+  private static readonly DEFENSIVE_LINE_PERCENT: Record<
+    DefensiveLine,
+    number
+  > = {
+    VERY_DEEP: -9,
+    DEEP: -4.5,
+    STANDARD: 0,
+    HIGH: 4.5,
+    VERY_HIGH: 9,
+  };
+
+  private static readonly MENTALITY_LINE_STEP: Record<TeamMentality, number> = {
+    VERY_DEFENSIVE: -2,
+    DEFENSIVE: -1,
+    BALANCED: 0,
+    ATTACKING: 1,
+    VERY_ATTACKING: 2,
+  };
+
+  private static readonly STYLE_LINE_STEP: Record<TeamStyle, number> = {
+    POSSESSION: 0,
+    TIKI_TAKA: 1,
+    GEGENPRESS: 1,
+    COUNTER_ATTACKING: -1,
+    DIRECT: 0,
+    WING_PLAY: 0,
+  };
+
+  // resolve() is called per player per tick, so results are cached.
+  private static readonly cache = new Map<string, ResolvedTactics>();
+
+  // ---------------------------------------------------------------------
+  // Resolution
+  // ---------------------------------------------------------------------
 
   static resolve(tactics: TeamTactics): TacticalModifiers {
-    const pressingStyle =
-      tactics.pressing ?? this.DEFAULT_PRESSING[tactics.style];
-    const defensiveLine =
-      tactics.defensiveLine ?? this.DEFAULT_DEFENSIVE_LINE[tactics.mentality];
+    return this.explain(tactics).modifiers;
+  }
 
-    const key = [
-      tactics.style,
-      tactics.mentality,
-      pressingStyle,
-      defensiveLine,
-    ].join("|");
+  // Same as resolve(), but also returns the pressing and defensive line that
+  // were actually used, which is useful for the UI and for debugging.
+  static explain(tactics: TeamTactics): ResolvedTactics {
+    const pressing = this.getEffectivePressing(tactics);
+    const defensiveLine = this.getEffectiveDefensiveLine(tactics);
+
+    const key = [tactics.style, tactics.mentality, pressing, defensiveLine].join(
+      "|",
+    );
 
     const cached = this.cache.get(key);
     if (cached) return cached;
 
+    // Metres per 1% of pitch length. Tables above are in percent so the same
+    // tactic looks the same on any pitch size.
+    const metresPerPercent = PITCH_DIMENSIONS.length / 100;
+
     const modifiers: Mutable<TacticalModifiers> = { ...this.NEUTRAL };
 
-    this.apply(modifiers, this.MENTALITY[tactics.mentality]);
-    this.apply(modifiers, this.STYLE[tactics.style]);
+    this.apply(modifiers, this.MENTALITY[tactics.mentality] ?? {});
+    this.apply(modifiers, this.STYLE[tactics.style] ?? {});
 
-    const pressing = this.PRESSING[pressingStyle];
-    modifiers.pressMaxProgress = pressing.maxProgress;
-    modifiers.pressChasers = pressing.chasers;
-    modifiers.pressBonus = pressing.bonus;
+    modifiers.lineHeight =
+      this.clamp(
+        modifiers.lineHeight,
+        -this.MAX_LINE_SHIFT_PERCENT,
+        this.MAX_LINE_SHIFT_PERCENT,
+      ) * metresPerPercent;
 
-    modifiers.defensiveLineHeight = this.DEFENSIVE_LINE_METRES[defensiveLine];
+    modifiers.defensiveLineHeight =
+      this.DEFENSIVE_LINE_PERCENT[defensiveLine] * metresPerPercent;
 
+    const profile = this.PRESSING[pressing];
+    modifiers.pressMaxProgress = profile.maxProgress;
+    modifiers.pressChasers = profile.chasers;
+    modifiers.pressBonus = profile.bonus;
+
+    // Stacked style + mentality multipliers must not run away.
     modifiers.width = this.clamp(modifiers.width, 0.8, 1.25);
     modifiers.holdTempo = this.clamp(modifiers.holdTempo, 0.5, 1.5);
     modifiers.riskTolerance = this.clamp(modifiers.riskTolerance, 0.4, 1.6);
 
-    const frozen = Object.freeze(modifiers);
-    this.cache.set(key, frozen);
-    return frozen;
+    const resolved: ResolvedTactics = {
+      pressing,
+      defensiveLine,
+      modifiers: Object.freeze(modifiers),
+    };
+
+    this.cache.set(key, resolved);
+    return resolved;
   }
 
+  static getEffectivePressing(tactics: TeamTactics): PressingStyle {
+    if (tactics.pressing) return tactics.pressing;
+
+    const level =
+      (this.STYLE_PRESSING_LEVEL[tactics.style] ?? 1) +
+      (this.MENTALITY_PRESSING_STEP[tactics.mentality] ?? 0);
+
+    return (
+      this.PRESSING_ORDER[this.clampIndex(level, this.PRESSING_ORDER.length)] ??
+      "MID_BLOCK"
+    );
+  }
+
+  static getEffectiveDefensiveLine(tactics: TeamTactics): DefensiveLine {
+    if (tactics.defensiveLine) return tactics.defensiveLine;
+
+    const standard = this.DEFENSIVE_LINE_ORDER.indexOf("STANDARD");
+    const level =
+      standard +
+      (this.MENTALITY_LINE_STEP[tactics.mentality] ?? 0) +
+      (this.STYLE_LINE_STEP[tactics.style] ?? 0);
+
+    return (
+      this.DEFENSIVE_LINE_ORDER[
+        this.clampIndex(level, this.DEFENSIVE_LINE_ORDER.length)
+      ] ?? "STANDARD"
+    );
+  }
 
   static ballProgress(
     ballPosition: Vector2D,
@@ -190,7 +285,6 @@ export class TacticsService {
     return local.x / PITCH_DIMENSIONS.length;
   }
 
-  // True when the ball is inside the area where this team presses.
   static isInPressZone(context: DecisionContext): boolean {
     return (
       this.ballProgress(context.ball.position, context.attackingDirection) <=
@@ -198,11 +292,11 @@ export class TacticsService {
     );
   }
 
-  // True for the players allowed to leave shape and chase the ball.
   static isChaser(ballRank: number, tactics: TacticalModifiers): boolean {
     return ballRank < tactics.pressChasers;
   }
 
+  // Score added to an action by the team's style and mentality.
   static getActionBias(
     tactics: TacticalModifiers,
     action: DecisionAction,
@@ -227,10 +321,12 @@ export class TacticsService {
     }
   }
 
+  // Scales the minimum time a carrier keeps the ball.
   static scaleHoldTicks(ticks: number, tactics: TacticalModifiers): number {
     return Math.max(1, Math.round(ticks * tactics.holdTempo));
   }
 
+  // ---------------------------------------------------------------------
 
   private static apply(
     target: Mutable<TacticalModifiers>,
@@ -247,6 +343,10 @@ export class TacticsService {
     >) {
       target[key] *= value;
     }
+  }
+
+  private static clampIndex(value: number, length: number): number {
+    return Math.max(0, Math.min(length - 1, Math.round(value)));
   }
 
   private static clamp(value: number, min: number, max: number): number {

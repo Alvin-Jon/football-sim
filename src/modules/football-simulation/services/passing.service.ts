@@ -44,6 +44,7 @@ export class PassingService {
     const targetPosition = this.getTargetPosition(
       options,
       receiverState,
+      passerState,
     );
 
     const distance = PitchService.getDistance(
@@ -70,7 +71,7 @@ export class PassingService {
 
     const speed = this.getPassSpeed(options.type, distance);
 
-    const verticalSpeed = this.getVerticalSpeed(options.type);
+    const verticalSpeed = this.getVerticalSpeed(options.type, distance);
 
     const released = this.ballInteractionService.releaseBall(
       passer.id,
@@ -101,8 +102,34 @@ export class PassingService {
   private getTargetPosition(
     options: PassOptions,
     receiverState?: PlayerMatchState,
+    passerState?: PlayerMatchState,
   ): Vector2D {
-    if (!receiverState || options.type !== "THROUGH") {
+    if (!receiverState || !passerState) {
+      return options.targetPosition;
+    }
+
+    if (options.type === "LONG") {
+      const distance = PitchService.getDistance(
+        passerState.position,
+        receiverState.position,
+      );
+      const flightTime = this.getLongPassFlightTime(distance);
+      const lead = {
+        x: receiverState.velocity.x * flightTime,
+        y: receiverState.velocity.y * flightTime,
+      };
+      const leadDistance = Math.hypot(lead.x, lead.y);
+      const leadRatio = leadDistance > PASSING_CONSTANTS.MAX_LEAD_DISTANCE
+        ? PASSING_CONSTANTS.MAX_LEAD_DISTANCE / leadDistance
+        : 1;
+
+      return PitchService.clampPosition({
+        x: receiverState.position.x + lead.x * leadRatio,
+        y: receiverState.position.y + lead.y * leadRatio,
+      });
+    }
+
+    if (options.type !== "THROUGH") {
       return options.targetPosition;
     }
 
@@ -181,10 +208,7 @@ export class PassingService {
         );
 
       case "LONG": {
-        // Horizontal speed so the ball lands near the target after its flight.
-        const flightTime =
-          (2 * PASSING_CONSTANTS.LONG_PASS_VERTICAL_SPEED) /
-          BALL_CONSTANTS.GRAVITY;
+        const flightTime = this.getLongPassFlightTime(distance);
 
         return Math.max(
           PASSING_CONSTANTS.LONG_PASS_MIN_SPEED,
@@ -212,7 +236,21 @@ export class PassingService {
     return Math.max(minSpeed, Math.min(maxSpeed, speed));
   }
 
-  private getVerticalSpeed(type: PassOptions["type"]): number {
+  private getLongPassFlightTime(distance: number): number {
+    const minimumFlightTime =
+      (2 * PASSING_CONSTANTS.LONG_PASS_VERTICAL_SPEED) /
+      BALL_CONSTANTS.GRAVITY;
+
+    return Math.max(
+      minimumFlightTime,
+      distance / PASSING_CONSTANTS.LONG_PASS_MAX_SPEED,
+    );
+  }
+
+  private getVerticalSpeed(
+    type: PassOptions["type"],
+    distance: number,
+  ): number {
     switch (type) {
       case "SHORT":
         return PASSING_CONSTANTS.SHORT_PASS_VERTICAL_SPEED;
@@ -221,7 +259,10 @@ export class PassingService {
         return PASSING_CONSTANTS.THROUGH_BALL_VERTICAL_SPEED;
 
       case "LONG":
-        return PASSING_CONSTANTS.LONG_PASS_VERTICAL_SPEED;
+        return (
+          BALL_CONSTANTS.GRAVITY *
+          this.getLongPassFlightTime(distance)
+        ) / 2;
     }
   }
 
