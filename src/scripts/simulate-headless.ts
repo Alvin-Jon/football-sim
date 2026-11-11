@@ -4,12 +4,16 @@ import { PositionInfluenceService } from "../modules/football-simulation/service
 import { MatchStatisticsService } from "../modules/football-simulation/services/match-statistics.service.js";
 import {
   DUEL_KINDS,
+  PASS_FAILURE_REASONS,
   PASS_KINDS,
+  KEEPER_SHOT_OUTCOMES,
+  PREDICTION_BUCKETS,
 } from "../modules/football-simulation/types/statistics.types.js";
 import type {
   CarrierDuelStats,
   DuelKind,
   DuelBreakdown,
+  PassFailureReason,
   PassKind,
 } from "../modules/football-simulation/types/statistics.types.js";
 import { BAYVIEW, MANFIELD } from "../db/teams/index.js";
@@ -97,6 +101,92 @@ const matchRows: Record<string, number | string>[] = [];
 // Whole-run totals (every outfield player, both teams).
 const overall = empty();
 
+// Team-level pass mix and failure causes (keeper passes included).
+interface PassMixEntry {
+  attempted: number;
+  completed: number;
+  failures: Record<PassFailureReason, number>;
+}
+
+const passMix = Object.fromEntries(
+  PASS_KINDS.map((kind) => [
+    kind,
+    {
+      attempted: 0,
+      completed: 0,
+      failures: Object.fromEntries(
+        PASS_FAILURE_REASONS.map((reason) => [reason, 0]),
+      ),
+    },
+  ]),
+) as Record<PassKind, PassMixEntry>;
+
+// What keepers did with shots that ended as a save or a goal.
+const keeperTotals = Object.fromEntries(
+  KEEPER_SHOT_OUTCOMES.map((outcome) => [outcome, 0]),
+) as Record<(typeof KEEPER_SHOT_OUTCOMES)[number], number>;
+let keeperRolls = 0;
+let keeperRollChanceSum = 0;
+
+function collectKeeper(match: Match): void {
+  for (const team of [match.statistics.home, match.statistics.away]) {
+    for (const outcome of KEEPER_SHOT_OUTCOMES) {
+      keeperTotals[outcome] += team.keeperShots[outcome];
+    }
+    keeperRolls += team.saveRolls;
+    keeperRollChanceSum += team.saveRollChanceSum;
+  }
+}
+
+// Predicted vs actual completion, bucketed by predicted probability.
+const calibration = Object.fromEntries(
+  PREDICTION_BUCKETS.map((bucket) => [
+    bucket,
+    {
+      attempted: 0,
+      completed: 0,
+      predictedSum: 0,
+      failures: Object.fromEntries(
+        PASS_FAILURE_REASONS.map((reason) => [reason, 0]),
+      ),
+    },
+  ]),
+) as Record<
+  (typeof PREDICTION_BUCKETS)[number],
+  {
+    attempted: number;
+    completed: number;
+    predictedSum: number;
+    failures: Record<PassFailureReason, number>;
+  }
+>;
+
+function collectPassMix(match: Match): void {
+  for (const team of [match.statistics.home, match.statistics.away]) {
+    for (const bucket of PREDICTION_BUCKETS) {
+      calibration[bucket].attempted += team.passCalibration[bucket].attempted;
+      calibration[bucket].completed += team.passCalibration[bucket].completed;
+      calibration[bucket].predictedSum +=
+        team.passCalibration[bucket].predictedSum;
+
+      for (const reason of PASS_FAILURE_REASONS) {
+        calibration[bucket].failures[reason] +=
+          team.passCalibration[bucket].failures[reason];
+      }
+    }
+
+    for (const kind of PASS_KINDS) {
+      const entry = passMix[kind];
+      entry.attempted += team.passBreakdown[kind].attempted;
+      entry.completed += team.passBreakdown[kind].completed;
+
+      for (const reason of PASS_FAILURE_REASONS) {
+        entry.failures[reason] += team.passFailures[kind][reason];
+      }
+    }
+  }
+}
+
 function playMatch(index: number): Match {
   const engine = new MatchEngineService(
     TICK_RATE,
@@ -177,6 +267,8 @@ for (let index = 0; index < MATCHES; index++) {
   const seconds = ((performance.now() - started) / 1000).toFixed(1);
 
   collect(match);
+  collectPassMix(match);
+  collectKeeper(match);
 
   const { home, away } = match.statistics;
   const homeDuels = sumDuels(home.duelBreakdown);
@@ -288,3 +380,97 @@ console.table(
     }),
   ),
 );
+
+console.log(
+  "\nPASS MIX AND WHY PASSES FAIL (all passes incl. keepers)\n" +
+    "share = of all attempts; failure columns = % of that type's attempts;\n" +
+    "unresolved = replaced by another pass before anyone controlled it",
+);
+{
+  const totalAttempts = PASS_KINDS.reduce(
+    (sum, kind) => sum + passMix[kind].attempted,
+    0,
+  );
+
+  console.table(
+    PASS_KINDS.map((kind) => {
+      const entry = passMix[kind];
+      const failed = PASS_FAILURE_REASONS.reduce(
+        (sum, reason) => sum + entry.failures[reason],
+        0,
+      );
+
+      return {
+        kind,
+        attempts: entry.attempted,
+        share: pct(entry.attempted, totalAttempts),
+        "completed %": pct(entry.completed, entry.attempted),
+        "in lane %": pct(entry.failures.IN_LANE, entry.attempted),
+        "at receiver %": pct(entry.failures.WON_AT_RECEIVER, entry.attempted),
+        "miscontrol %": pct(entry.failures.RECEIVER_MISCONTROL, entry.attempted),
+        "untargeted %": pct(entry.failures.UNTARGETED, entry.attempted),
+        "recollected %": pct(entry.failures.RECOLLECTED, entry.attempted),
+        "out of play %": pct(entry.failures.OUT_OF_PLAY, entry.attempted),
+        "unresolved %": pct(
+          Math.max(0, entry.attempted - entry.completed - failed),
+          entry.attempted,
+        ),
+      };
+    }),
+  );
+}
+
+console.log(
+  "\nCALIBRATION: evaluator's predicted completion vs what happened\n" +
+    "(open-play short/through/long passes only; gap = actual - predicted,\n" +
+    "negative = the evaluator is too optimistic; failure columns are % of the\n" +
+    "bucket's attempts, so completed + failures add up to about 100%)",
+);
+console.table(
+  PREDICTION_BUCKETS.map((bucket) => {
+    const c = calibration[bucket];
+    const predicted = c.attempted === 0 ? null : c.predictedSum / c.attempted;
+    const actual = c.attempted === 0 ? null : c.completed / c.attempted;
+
+    return {
+      "predicted bucket": bucket,
+      attempts: c.attempted,
+      "avg predicted": predicted === null ? "-" : `${Math.round(predicted * 100)}%`,
+      actual: actual === null ? "-" : `${Math.round(actual * 100)}%`,
+      gap:
+        predicted === null || actual === null
+          ? "-"
+          : `${Math.round((actual - predicted) * 100)} pts`,
+      "in lane": pct(c.failures.IN_LANE, c.attempted),
+      "at receiver": pct(c.failures.WON_AT_RECEIVER, c.attempted),
+      miscontrol: pct(c.failures.RECEIVER_MISCONTROL, c.attempted),
+      recollected: pct(c.failures.RECOLLECTED, c.attempted),
+      "out of play": pct(c.failures.OUT_OF_PLAY, c.attempted),
+    };
+  }),
+);
+
+{
+  const total = KEEPER_SHOT_OUTCOMES.reduce(
+    (sum, outcome) => sum + keeperTotals[outcome],
+    0,
+  );
+
+  console.log(
+    "\nKEEPERS: what happened to shots that ended as a save or a goal\n" +
+      "(NO_ATTEMPT = never moved for it, NO_REACH = sent diving but too far,\n" +
+      "ROLL_FAILED = in reach but the save roll failed, NO_CONTACT = roll\n" +
+      "succeeded but he never reached the ball, UNPREDICTED = not seen as on target)",
+  );
+  console.table(
+    KEEPER_SHOT_OUTCOMES.map((outcome) => ({
+      outcome,
+      count: keeperTotals[outcome],
+      share: pct(keeperTotals[outcome], total),
+    })),
+  );
+  console.log(
+    `save rolls: ${keeperRolls}, average save chance on those rolls: ` +
+      `${keeperRolls === 0 ? "-" : Math.round((keeperRollChanceSum / keeperRolls) * 100) + "%"}`,
+  );
+}

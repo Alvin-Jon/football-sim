@@ -46,6 +46,17 @@ export const DUEL_CONSTANTS = {
   STAMINA_COST_DRIBBLER_WIN: 0.8,
   STAMINA_COST_TACKLER: 0.5,
   STAMINA_COST_DISPOSSESSED: 0.5,
+
+  // A defender only commits to a tackle when his estimated chance of
+  // disrupting the carrier clears a threshold; otherwise he stays on him.
+  // threshold = BASE - aggression * PER_AGGRESSION (- discounts), clamped.
+  COMMIT_BASE: 0.72,
+  COMMIT_PER_AGGRESSION: 0.012,
+  COMMIT_DIVER_DISCOUNT: 0.15, // DIVES_INTO_TACKLES trait
+  COMMIT_DANGER_DISCOUNT: 0.12, // carrier close to the defender's own goal
+  COMMIT_MIN: 0.2,
+  COMMIT_MAX: 0.7,
+  DANGER_DISTANCE: 25,
 } as const;
 
 export const TAKE_ON_ATTACK: AttributeWeights = {

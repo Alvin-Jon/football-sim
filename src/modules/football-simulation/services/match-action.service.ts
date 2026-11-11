@@ -19,9 +19,12 @@ import type { PlayerMatchState } from "../types/player-state.types.js";
 import type { Team } from "../types/team.types.js";
 import type { TeamMatchState } from "../types/team-state.types.js";
 import { debugLog } from "../utils/debug-log.js";
+import { PassPredictionStore } from "../utils/pass-prediction.store.js";
 import { calculatePressure } from "../utils/pressure.utils.js";
 import { DUEL_CONSTANTS } from "../constants/duel.constants.js";
+import { INTERCEPTION_CONSTANTS } from "../constants/interception.constants.js";
 import { PITCH_DIMENSIONS } from "../constants/pitch.constants.js";
+import { RECEIVING_CONSTANTS } from "../constants/receiving.constants.js";
 import { ActionEngineService } from "./action-engine.service.js";
 import { BallInteractionService } from "./ball-interaction.service.js";
 import { BallPhysicsService } from "./ball-physics.service.js";
@@ -42,7 +45,11 @@ import { PitchService } from "./pitch.service.js";
 import { ReceivingService } from "./receiving.service.js";
 import { ShootingService } from "./shooting.service.js";
 import { MatchStatisticsService } from "./match-statistics.service.js";
-import type { PassKind } from "../types/statistics.types.js";
+import type {
+  KeeperShotOutcome,
+  PassFailureReason,
+  PassKind,
+} from "../types/statistics.types.js";
 import { FormationPositioningService } from "./formation-positioning.service.js";
 import { TacticsService } from "./tactics.service.js";
 import { TackleDuelService } from "./tackle-duel.service.js";
@@ -56,6 +63,7 @@ interface PendingPass {
   tick: number;
   kind: PassKind;
   miscontrolledPlayerIds: Set<string>;
+  predicted?: number | undefined;
 }
 
 interface PendingShot {
@@ -63,6 +71,10 @@ interface PendingShot {
   shooterId: string;
   teamId: string;
   tick: number;
+  onTarget: boolean;
+  keeperDived?: boolean;
+  rollChance?: number;
+  rollSucceeded?: boolean;
 }
 
 interface LastCompletedPass {
@@ -93,7 +105,9 @@ const ON_BALL_ACTIONS: ReadonlyArray<DecisionResult["action"]> = [
 
 export class MatchActionService {
   private static readonly RELEASE_LOCKOUT_TICKS = 10;
-  private static readonly TACKLE_COOLDOWN_TICKS = 60;
+  private static readonly PASSER_EXCLUSION_TICKS = 30;
+  private static readonly TACKLE_COOLDOWN_TICKS = 120;
+  private static readonly CONTEST_INTERVAL_TICKS = 8;
   private static readonly POSSESSION_SHIELD_TICKS = 20;
   private static readonly MIN_HOLD_TICKS = 60;
   private static readonly PRESSURE_HOLD_TICKS = 10;
@@ -138,6 +152,7 @@ export class MatchActionService {
     this.ballInteraction,
   );
   private readonly pendingPasses = new Map<string, PendingPass>();
+  private readonly contestTicks = new Map<string, number>();
   private readonly pendingShots = new Map<string, PendingShot>();
   private readonly releaseLockouts = new Map<string, number>();
   private readonly tackleCooldowns = new Map<string, number>();
@@ -273,6 +288,16 @@ export class MatchActionService {
     return (this.releaseLockouts.get(playerId) ?? 0) > match.tick;
   }
 
+  private isOwnPassInFlight(match: MatchState, playerId: string): boolean {
+    const pending = this.pendingPasses.get(match.id);
+
+    return (
+      pending !== undefined &&
+      pending.passerId === playerId &&
+      match.tick - pending.tick < MatchActionService.PASSER_EXCLUSION_TICKS
+    );
+  }
+
   private grantPossessionShield(match: MatchState, playerId: string): void {
     this.possessionStarts.set(playerId, match.tick);
     this.possessionShields.set(
@@ -334,6 +359,15 @@ export class MatchActionService {
     state.currentAction = "DRIBBLING";
   }
 
+  private carryAndReassess(
+    player: Player,
+    state: PlayerMatchState,
+    context: DecisionContext,
+  ): void {
+    this.carryBall(player, state, context);
+    this.decisionEngine.invalidateDecision(player.id);
+  }
+
   // True while a pass by the OTHER team has only just left the passer, so
   // this team's players cannot yet collect it.
   private isPassProtected(match: MatchState, teamId: string): boolean {
@@ -358,6 +392,39 @@ export class MatchActionService {
     return (this.possessionShields.get(playerId) ?? 0) > match.tick;
   }
 
+  private mayContestPass(
+    match: MatchState,
+    playerId: string,
+    teamId: string,
+  ): boolean {
+    const pending = this.pendingPasses.get(match.id);
+    if (
+      !pending ||
+      pending.teamId === teamId ||
+      pending.receiverId === playerId
+    ) {
+      return true;
+    }
+
+    const key = `${match.id}:${playerId}`;
+    const last = this.contestTicks.get(key);
+    if (
+      last !== undefined &&
+      match.tick - last < MatchActionService.CONTEST_INTERVAL_TICKS
+    ) {
+      return false;
+    }
+
+    this.contestTicks.set(key, match.tick);
+    return true;
+  }
+
+  private clearPassContestTicks(matchId: string): void {
+    const prefix = `${matchId}:`;
+    for (const key of this.contestTicks.keys()) {
+      if (key.startsWith(prefix)) this.contestTicks.delete(key);
+    }
+  }
 
   private trackPossessionChange(match: MatchState): void {
     const holder = match.ball.possessionPlayerId;
@@ -434,6 +501,7 @@ export class MatchActionService {
     ].filter(
       ({ player }) =>
         !this.isLockedOut(match, player.id) &&
+        !this.isOwnPassInFlight(match, player.id) &&
         !this.isPassProtected(match, this.getPlayerTeamId(match, player.id)),
     );
 
@@ -459,10 +527,17 @@ export class MatchActionService {
     for (const { player, state } of candidates) {
       if (match.ball.possessionPlayerId !== null) return;
 
+      const teamId = this.getPlayerTeamId(match, player.id);
+      const inRange =
+        PitchService.getDistance(state.position, match.ball.position) <=
+        RECEIVING_CONSTANTS.RECEIVING_RADIUS;
+
+      if (inRange && !this.mayContestPass(match, player.id, teamId)) continue;
+
       const receiveResult = this.receiving.attemptReceive(
         player,
         state,
-        this.getPlayerTeamId(match, player.id),
+        teamId,
         match.ball,
         chasers.has(player.id),
       );
@@ -471,9 +546,9 @@ export class MatchActionService {
         const pending = this.pendingPasses.get(match.id);
         if (pending && !pending.miscontrolledPlayerIds.has(player.id)) {
           pending.miscontrolledPlayerIds.add(player.id);
-          debugLog(
-            `[pass] receiver_miscontrol match=${match.id} tick=${match.tick} kind=${pending.kind} passer=${this.findPlayer(match, pending.passerId)?.player.name ?? pending.passerId} intendedReceiver=${pending.receiverId ? this.findPlayer(match, pending.receiverId)?.player.name ?? pending.receiverId : "unspecified"} player=${player.name} controlChance=${receiveResult.controlChance.toFixed(2)} distance=${receiveResult.distanceToBall.toFixed(2)}m ballSpeed=${Math.hypot(match.ball.velocity.x, match.ball.velocity.y).toFixed(2)}`,
-          );
+          //debugLog(
+          //  `[pass] receiver_miscontrol match=${match.id} tick=${match.tick} kind=${pending.kind} passer=${this.findPlayer(match, pending.passerId)?.player.name ?? pending.passerId} intendedReceiver=${pending.receiverId ? this.findPlayer(match, pending.receiverId)?.player.name ?? pending.receiverId : "unspecified"} player=${player.name} controlChance=${receiveResult.controlChance.toFixed(2)} distance=${receiveResult.distanceToBall.toFixed(2)}m ballSpeed=${Math.hypot(match.ball.velocity.x, match.ball.velocity.y).toFixed(2)}`,
+          //);
         }
       }
 
@@ -508,6 +583,10 @@ export class MatchActionService {
       direction,
     );
     const decision = this.goalkeeperDecision.decide(context);
+    if (decision.action === "DIVE") {
+      const shot = this.pendingShots.get(match.id);
+      if (shot && shot.teamId !== team.id) shot.keeperDived = true;
+    }
     this.goalkeeperAction.execute(state, decision);
 
     if (decision.action === "DISTRIBUTE") {
@@ -910,18 +989,25 @@ export class MatchActionService {
         }
 
         // Don't let the player who just released the ball "intercept" it.
-        if (this.isLockedOut(match, player.id)) return;
+        if (
+          this.isLockedOut(match, player.id) ||
+          this.isOwnPassInFlight(match, player.id)
+        ) return;
 
         // A defender next to the passer cannot snatch a pass that has only
         // just been played.
         if (this.isPassProtected(match, team.id)) return;
 
         this.cancelRunningAction(player.id, state);
+        const inRange =
+          PitchService.getDistance(state.position, match.ball.position) <=
+          INTERCEPTION_CONSTANTS.INTERCEPTION_RADIUS;
 
         this.interception.resolveInterception(
           [{ player, state }],
           team.id,
           match.ball,
+          !inRange || this.mayContestPass(match, player.id, team.id),
         );
 
         return;
@@ -931,7 +1017,7 @@ export class MatchActionService {
       case "THROUGH_BALL":
       case "LONG_BALL":
         if (this.mustKeepBall(match, player.id, context)) {
-          this.carryBall(player, state, context);
+          this.carryAndReassess(player, state, context);
           return;
         }
         this.executePass(match, team, teamState, player, state, context, decision);
@@ -939,7 +1025,7 @@ export class MatchActionService {
 
       case "CROSS":
         if (this.mustKeepBall(match, player.id, context)) {
-          this.carryBall(player, state, context);
+          this.carryAndReassess(player, state, context);
           return;
         }
         this.executeCross(match, team, player, state, context, decision);
@@ -947,7 +1033,7 @@ export class MatchActionService {
 
       case "SHOOT":
         if (this.mustKeepBall(match, player.id, context)) {
-          this.carryBall(player, state, context);
+          this.carryAndReassess(player, state, context);
           return;
         }
         this.executeShot(match, team, player, state, context);
@@ -1017,9 +1103,9 @@ export class MatchActionService {
       receiver,
     );
     if (!result.successful) {
-      debugLog(
-        `[pass] release_failed match=${match.id} tick=${match.tick} passer=${player.name} kind=${passType} reason=${result.message ?? "unknown"}`,
-      );
+      //debugLog(
+       // `[pass] release_failed match=${match.id} tick=${match.tick} passer=${player.name} kind=${passType} reason=${result.message ?? "unknown"}`,
+      //);
       return;
     }
 
@@ -1028,6 +1114,10 @@ export class MatchActionService {
     state.currentAction = "PASSING";
 
     MatchStatisticsService.recordPass(match, team.id, player.id, passType);
+    const predicted = decision.targetPlayerId
+      ? PassPredictionStore.take(player.id, decision.targetPlayerId, passType)
+      : undefined;
+
     this.pendingPasses.set(match.id, {
       passerId: player.id,
       receiverId: decision.targetPlayerId ?? null,
@@ -1035,6 +1125,7 @@ export class MatchActionService {
       tick: match.tick,
       kind: passType,
       miscontrolledPlayerIds: new Set(),
+      predicted,
     });
   }
 
@@ -1047,7 +1138,12 @@ export class MatchActionService {
     decision: DecisionResult,
   ): void {
     this.cancelRunningAction(player.id, state);
-    const receiver = context.teammates
+    const chosen = decision.targetPlayerId
+      ? context.teammates.find(
+          (teammate) => teammate.player.id === decision.targetPlayerId,
+        )
+      : undefined;
+    const receiver = chosen ?? context.teammates
       .map((teammate) => ({
         teammate,
         forwardDistance: this.positionService.getForwardDistance(
@@ -1076,9 +1172,9 @@ export class MatchActionService {
       receiver?.state,
     );
     if (!result.successful) {
-      debugLog(
-        `[pass] release_failed match=${match.id} tick=${match.tick} passer=${player.name} kind=CROSS reason=${result.message ?? "unknown"}`,
-      );
+      //debugLog(
+      //  `[pass] release_failed match=${match.id} tick=${match.tick} passer=${player.name} kind=CROSS reason=${result.message ?? "unknown"}`,
+     // );
       return;
     }
 
@@ -1183,6 +1279,7 @@ export class MatchActionService {
         teamId: team.id,
         assistPlayerId,
         tick: match.tick,
+        onTarget: predictedShot?.isOnTarget ?? false,
       });
     }
   }
@@ -1282,6 +1379,31 @@ export class MatchActionService {
       return;
     }
 
+    const duelInput = {
+      tackler: player,
+      tacklerState: state,
+      carrier: carrier.player,
+      carrierState: carrier.state,
+      hardTackle: decision.action === "HARD_TACKLE",
+    };
+    const ownGoal = {
+      x: context.goalPosition.x === 0 ? PITCH_DIMENSIONS.length : 0,
+      y: PITCH_DIMENSIONS.width / 2,
+    };
+    const nearOwnGoal =
+      PitchService.getDistance(carrier.state.position, ownGoal) <
+      DUEL_CONSTANTS.DANGER_DISTANCE;
+
+    if (
+      this.tackleDuel.estimate(duelInput).tackleChance <
+      this.tackleDuel.getCommitThreshold(player, nearOwnGoal)
+    ) {
+      state.targetPosition = { ...carrier.state.position };
+      state.isMoving = true;
+      state.currentAction = "PRESSING";
+      return;
+    }
+
     this.tackleCooldowns.set(
       player.id,
       match.tick + MatchActionService.TACKLE_COOLDOWN_TICKS,
@@ -1289,19 +1411,13 @@ export class MatchActionService {
 
     state.currentAction = "TACKLING";
 
-    const outcome = this.tackleDuel.resolve({
-      tackler: player,
-      tacklerState: state,
-      carrier: carrier.player,
-      carrierState: carrier.state,
-      hardTackle: decision.action === "HARD_TACKLE",
-    });
+    const outcome = this.tackleDuel.resolve(duelInput);
 
     this.applyDuelOutcome(match, teamId, player, state, carrier, outcome);
 
-    debugLog(
-      `[duel] match=${match.id} tick=${match.tick} tackler=${player.name} carrier=${carrier.player.name} mode=${outcome.mode} chance=${outcome.tackleChance.toFixed(2)} clean=${outcome.cleanShare.toFixed(2)} front=${outcome.frontness.toFixed(2)} result=${outcome.result}`,
-    );
+    //debugLog(
+     // `[duel] match=${match.id} tick=${match.tick} tackler=${player.name} carrier=${carrier.player.name} mode=${outcome.mode} chance=${outcome.tackleChance.toFixed(2)} clean=${outcome.cleanShare.toFixed(2)} front=${outcome.frontness.toFixed(2)} result=${outcome.result}`,
+    //);
 
     MatchStatisticsService.recordTackle(
       match,
@@ -1400,12 +1516,34 @@ export class MatchActionService {
     const pending = this.pendingPasses.get(match.id);
     if (!pending) return;
 
-    // The passer touching the ball again is not a result; keep waiting.
-    if (receiverId === pending.passerId) return;
+    if (receiverId === pending.passerId) {
+      const reason: PassFailureReason =
+        pending.miscontrolledPlayerIds.size > 0
+          ? "RECEIVER_MISCONTROL"
+          : "RECOLLECTED";
+
+      MatchStatisticsService.recordPassFailure(
+        match,
+        pending.teamId,
+        pending.kind,
+        reason,
+      );
+      this.recordPrediction(match, pending, false, reason);
+      this.logPassFailure(
+        match,
+        pending,
+        "RECOLLECTED_BY_PASSER",
+        `cause=${reason} ticks=${match.tick - pending.tick}`,
+      );
+      this.pendingPasses.delete(match.id);
+      this.clearPassContestTicks(match.id);
+      return;
+    }
 
     const receiverTeamId = this.getPlayerTeamId(match, receiverId);
 
     if (receiverTeamId === pending.teamId) {
+      this.recordPrediction(match, pending, true);
       MatchStatisticsService.completePass(
         match,
         pending.teamId,
@@ -1420,12 +1558,34 @@ export class MatchActionService {
         tick: match.tick,
       });
     } else {
-      // Intercepted by an opponent.
+      const intended = pending.receiverId
+        ? this.findPlayer(match, pending.receiverId)
+        : undefined;
+      const reason: PassFailureReason =
+        pending.receiverId === null
+          ? "UNTARGETED"
+          : pending.miscontrolledPlayerIds.has(pending.receiverId)
+            ? "RECEIVER_MISCONTROL"
+            : intended &&
+                PitchService.getDistance(
+                  match.ball.position,
+                  intended.state.position,
+                ) <= 3
+              ? "WON_AT_RECEIVER"
+              : "IN_LANE";
+
+      MatchStatisticsService.recordPassFailure(
+        match,
+        pending.teamId,
+        pending.kind,
+        reason,
+      );
+      this.recordPrediction(match, pending, false, reason);
       this.logPassFailure(
         match,
         pending,
         "INTERCEPTED",
-        `interceptor=${this.findPlayer(match, receiverId)?.player.name ?? receiverId}`,
+        `cause=${reason} interceptor=${this.findPlayer(match, receiverId)?.player.name ?? receiverId}`,
       );
       MatchStatisticsService.recordInterception(
         match,
@@ -1436,6 +1596,24 @@ export class MatchActionService {
     }
 
     this.pendingPasses.delete(match.id);
+    this.clearPassContestTicks(match.id);
+  }
+
+  private recordPrediction(
+    match: MatchState,
+    pending: PendingPass,
+    completed: boolean,
+    reason?: PassFailureReason,
+  ): void {
+    if (pending.predicted === undefined) return;
+
+    MatchStatisticsService.recordPassPrediction(
+      match,
+      pending.teamId,
+      pending.predicted,
+      completed,
+      reason,
+    );
   }
 
   private logPassFailure(
@@ -1451,9 +1629,9 @@ export class MatchActionService {
         pending.receiverId
       : "unspecified";
 
-    debugLog(
-      `[pass] failed match=${match.id} tick=${match.tick} kind=${pending.kind} passer=${passer} intendedReceiver=${receiver} reason=${reason} ${details}`,
-    );
+    //debugLog(
+    //  `[pass] failed match=${match.id} tick=${match.tick} kind=${pending.kind} passer=${passer} intendedReceiver=${receiver} reason=${reason} ${details}`,
+   // );
   }
 
   private getDecisionPlayers(
@@ -1502,6 +1680,11 @@ export class MatchActionService {
       saveType,
     );
 
+    if (shot && shot.teamId !== this.getPlayerTeamId(match, goalkeeperId)) {
+      shot.rollChance = result.saveChance;
+      shot.rollSucceeded = result.successful;
+    }
+
     if (key !== null) {
       this.saveRolls.set(goalkeeperId, { key, successful: result.successful });
     }
@@ -1523,6 +1706,12 @@ export class MatchActionService {
       match.tick - shot.tick <= MatchActionService.SHOT_WINDOW_TICKS
     ) {
       MatchStatisticsService.recordSave(match, teamId, goalkeeperId);
+      MatchStatisticsService.recordKeeperShot(
+        match,
+        teamId,
+        "SAVED",
+        shot.rollChance,
+      );
       this.pendingShots.delete(match.id);
     }
   }
@@ -1614,6 +1803,29 @@ export class MatchActionService {
             : undefined;
 
         if (liveShot || MatchActionService.ALLOW_NON_SHOT_GOALS) {
+          if (liveShot) {
+            const defendingTeamId =
+              scoringTeamId === match.homeTeam.id
+                ? match.awayTeam.id
+                : match.homeTeam.id;
+            const outcome: KeeperShotOutcome = !liveShot.onTarget
+              ? "GOAL_UNPREDICTED"
+              : liveShot.rollSucceeded === undefined
+                ? liveShot.keeperDived
+                  ? "GOAL_NO_REACH"
+                  : "GOAL_NO_ATTEMPT"
+                : liveShot.rollSucceeded
+                  ? "GOAL_NO_CONTACT"
+                  : "GOAL_ROLL_FAILED";
+
+            MatchStatisticsService.recordKeeperShot(
+              match,
+              defendingTeamId,
+              outcome,
+              liveShot.rollChance,
+            );
+          }
+
           scoringTeamState.score++;
 
           MatchStatisticsService.recordGoal(
@@ -1638,6 +1850,7 @@ export class MatchActionService {
 
           this.pendingShots.delete(match.id);
           this.pendingPasses.delete(match.id);
+          this.clearPassContestTicks(match.id);
           this.lastCompletedPasses.delete(match.id);
           this.resetBall(match);
           const concedingTeam =
@@ -1679,9 +1892,17 @@ export class MatchActionService {
           "BALL_OUT_OF_PLAY",
           `position=(${currentPosition.x.toFixed(2)},${currentPosition.y.toFixed(2)})`,
         );
+        MatchStatisticsService.recordPassFailure(
+          match,
+          pending.teamId,
+          pending.kind,
+          "OUT_OF_PLAY",
+        );
+        this.recordPrediction(match, pending, false, "OUT_OF_PLAY");
+        this.pendingPasses.delete(match.id);
+        this.clearPassContestTicks(match.id);
       }
 
-      this.pendingPasses.delete(match.id);
       this.lastCompletedPasses.delete(match.id);
       const pendingShot = this.pendingShots.get(match.id);
       this.pendingShots.delete(match.id);
@@ -1701,9 +1922,9 @@ export class MatchActionService {
       match.restart = restart;
 
       if (restart) {
-        debugLog(
-          `[restart] type=${restart.type} team=${restart.teamId} position=(${restart.position.x.toFixed(2)},${restart.position.y.toFixed(2)})`,
-        );
+        //debugLog(
+         // `[restart] type=${restart.type} team=${restart.teamId} position=(${restart.position.x.toFixed(2)},${restart.position.y.toFixed(2)})`,
+       // );
       }
     }
   }

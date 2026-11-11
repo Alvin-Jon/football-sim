@@ -18,9 +18,11 @@ import { PositionInfluenceService } from "./position-influence.service.js";
 import type { FormationSlot } from "../types/formation.types.js";
 import type { FormationFluidity } from "../types/formation.types.js";
 import { TacticsService } from "./tactics.service.js";
+import { PITCH_DIMENSIONS } from "../constants/pitch.constants.js";
 
 
 export class DecisionEngineService {
+  private static readonly TEMPO_SCALE = 1;
   private static readonly SUPPORT_COUNT = 3;
 
   private static readonly SHAPE_BONUS = 30;
@@ -81,14 +83,48 @@ export class DecisionEngineService {
       });
     }
 
-    // Crossing
-    if (distanceToGoal < 35) {
-      candidates.push({
-        action: "CROSS",
-        score: 0,
-        targetPosition: goalPosition,
-        reasoning: ["Deliver the ball into the attacking area"],
-      });
+    // Cross only from a wide position to a teammate in the box.
+    const isWide =
+      Math.abs(playerPosition.y - PITCH_DIMENSIONS.width / 2) > 18;
+
+    if (isWide && distanceToGoal < 40) {
+      let best:
+        | { id: string; position: { x: number; y: number }; score: number }
+        | undefined;
+
+      for (const teammate of context.teammates) {
+        if (teammate.player.position === "GK") continue;
+
+        const position = teammate.state.position;
+        const toGoal = PitchService.getDistance(position, goalPosition);
+
+        if (toGoal > 22) continue;
+        if (Math.abs(position.x - goalPosition.x) < 4) continue;
+
+        let nearestOpponent = Infinity;
+        for (const opponent of context.opponents) {
+          nearestOpponent = Math.min(
+            nearestOpponent,
+            PitchService.getDistance(position, opponent.state.position),
+          );
+        }
+
+        const score = Math.min(nearestOpponent, 8) - toGoal * 0.3;
+
+        if (!best || score > best.score) {
+          best = { id: teammate.player.id, position, score };
+        }
+      }
+
+      if (best) {
+        candidates.push({
+          action: "CROSS",
+          score: 0,
+          targetPlayerId: best.id,
+          targetPosition: best.position,
+          reasoning: ["Deliver the ball to a teammate in the box"],
+        });
+      }
     }
 
     // Passing options
@@ -346,9 +382,10 @@ export class DecisionEngineService {
       );
     }
 
-    if (nearest >= 6) return -32;
-    if (nearest >= 4) return -20;
-    if (nearest >= 2.5) return -8;
+    const scale = DecisionEngineService.TEMPO_SCALE;
+    if (nearest >= 6) return -32 * scale;
+    if (nearest >= 4) return -20 * scale;
+    if (nearest >= 2.5) return -8 * scale;
 
     return 0;
   }

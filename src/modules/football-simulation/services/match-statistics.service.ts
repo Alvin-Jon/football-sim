@@ -1,8 +1,11 @@
 import type { MatchState } from "../types/match.types.js";
+import { getPredictionBucket } from "../types/statistics.types.js";
 import type {
   DuelKind,
   DuelResultKind,
+  KeeperShotOutcome,
   PassBreakdown,
+  PassFailureReason,
   PassKind,
   PassTypeStats,
 } from "../types/statistics.types.js";
@@ -65,6 +68,52 @@ export class MatchStatisticsService {
     if (player) {
       player.passesCompleted++;
       this.addPass(player, kind, "completed");
+    }
+  }
+
+  // Team-level record of why a pass did not reach a teammate.
+  static recordPassFailure(
+    match: MatchState,
+    teamId: string,
+    kind: PassKind,
+    reason: PassFailureReason,
+  ): void {
+    this.getTeamStatistics(match, teamId).passFailures[kind][reason]++;
+  }
+
+  // Compares the evaluator's predicted completion with the real outcome.
+  static recordPassPrediction(
+    match: MatchState,
+    teamId: string,
+    predicted: number,
+    completed: boolean,
+    reason?: PassFailureReason,
+  ): void {
+    const bucket =
+      this.getTeamStatistics(match, teamId).passCalibration[
+        getPredictionBucket(predicted)
+      ];
+
+    bucket.attempted++;
+    bucket.predictedSum += predicted;
+    if (completed) bucket.completed++;
+    else if (reason) bucket.failures[reason]++;
+  }
+
+  // What the defending keeper did with a shot that ended as a save or goal.
+  static recordKeeperShot(
+    match: MatchState,
+    defendingTeamId: string,
+    outcome: KeeperShotOutcome,
+    rollChance?: number,
+  ): void {
+    const team = this.getTeamStatistics(match, defendingTeamId);
+
+    team.keeperShots[outcome]++;
+
+    if (rollChance !== undefined) {
+      team.saveRolls++;
+      team.saveRollChanceSum += rollChance;
     }
   }
 

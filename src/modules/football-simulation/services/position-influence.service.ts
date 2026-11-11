@@ -91,7 +91,7 @@ export class PositionInfluenceService {
       CROSS: -30,
       DRIBBLE: 6,
       SHOOT: 6,
-      HOLD_BALL: 4,
+      HOLD_BALL: -6,
       MAKE_RUN: 12,
       SUPPORT: -10,
     },

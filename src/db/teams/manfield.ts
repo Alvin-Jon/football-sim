@@ -25,7 +25,7 @@ const MANFIELD_PLAYERS: Player[] = [
   PLAYERS.Rodrigo,
 ];
 
-const formation = FORMATION_4231_DM;
+const formation = FORMATION_433;
 
 const debuff = (attributes: PlayerAttributes, multiplier: number): PlayerAttributes => {
   const result = { ...attributes };
@@ -55,7 +55,7 @@ const players: Player[] = MANFIELD_PLAYERS.map((player, index) => {
 });
 
 const setPieceTakerId = players.find(
-  (player) => player.position === "AM",
+  (player) => player.position === "CM",
 )?.id;
 if (!setPieceTakerId) {
   throw new Error("Manfield United has no attacking midfielder for set pieces");
@@ -67,13 +67,13 @@ export const MANFIELD: Team = {
   formation,
   color: "red",
   tactics: {
-    style: "POSSESSION",
-    mentality: "BALANCED",
+    style: "GEGENPRESS",
+    mentality: "VERY_DEFENSIVE",
     formationFluidity: "FLUID",
     setPieceTakerId,
     cornerAttackersInBox: 6,
-    pressing: "MID_BLOCK",
-    defensiveLine: "STANDARD"
+    pressing: "OWN_HALF",
+    defensiveLine: "VERY_DEEP"
   },
 
   players,

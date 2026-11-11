@@ -197,11 +197,12 @@ export class PassingService {
       return options.targetPosition;
     }
 
+    const distance = PitchService.getDistance(
+      passerState.position,
+      receiverState.position,
+    );
+
     if (options.type === "LONG") {
-      const distance = PitchService.getDistance(
-        passerState.position,
-        receiverState.position,
-      );
       const flightTime = PassingService.getLongPassFlightTime(distance);
       const lead = {
         x: receiverState.velocity.x * flightTime,
@@ -219,31 +220,31 @@ export class PassingService {
       });
     }
 
-    if (options.type !== "THROUGH") {
-      return options.targetPosition;
-    }
-
-    const distance = PitchService.getDistance(
-      receiverState.position,
-      options.targetPosition,
+    // SHORT and THROUGH: aim at where the receiver is NOW (the decision that
+    // led here can be several ticks old), led by his velocity over the
+    // ball's flight so a moving receiver is not passed behind.
+    const flightTime = PassingService.getFlight(
+      options.type,
+      distance,
+    ).totalTime;
+    const leadTime = Math.min(
+      flightTime,
+      options.type === "THROUGH" ? 1.2 : 0.6,
     );
+    const maxLead =
+      options.type === "THROUGH" ? PASSING_CONSTANTS.MAX_LEAD_DISTANCE : 3;
 
-    const leadRatio =
-      distance > PASSING_CONSTANTS.MAX_LEAD_DISTANCE
-        ? PASSING_CONSTANTS.MAX_LEAD_DISTANCE / distance
-        : 1;
-
-    return {
-      x:
-        receiverState.position.x +
-        receiverState.velocity.x * 0.5 +
-        (options.targetPosition.x - receiverState.position.x) * leadRatio,
-
-      y:
-        receiverState.position.y +
-        receiverState.velocity.y * 0.5 +
-        (options.targetPosition.y - receiverState.position.y) * leadRatio,
+    const lead = {
+      x: receiverState.velocity.x * leadTime,
+      y: receiverState.velocity.y * leadTime,
     };
+    const leadDistance = Math.hypot(lead.x, lead.y);
+    const leadRatio = leadDistance > maxLead ? maxLead / leadDistance : 1;
+
+    return PitchService.clampPosition({
+      x: receiverState.position.x + lead.x * leadRatio,
+      y: receiverState.position.y + lead.y * leadRatio,
+    });
   }
 
   /**

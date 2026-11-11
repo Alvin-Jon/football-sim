@@ -28,8 +28,7 @@ export interface DuelInput {
   hardTackle: boolean;
 }
 
-export interface DuelOutcome {
-  result: DuelResult;
+export interface DuelEstimate {
   mode: DuelMode;
   /** Probability the tackle disrupts the carrier at all. */
   tackleChance: number;
@@ -39,6 +38,10 @@ export interface DuelOutcome {
   frontness: number;
 }
 
+export interface DuelOutcome extends DuelEstimate {
+  result: DuelResult;
+}
+
 const sigmoid = (x: number): number => 1 / (1 + Math.exp(-x));
 const clamp = (v: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, v));
@@ -46,7 +49,8 @@ const clamp = (v: number, min: number, max: number): number =>
 export class TackleDuelService {
   constructor(private readonly random: () => number = Math.random) {}
 
-  resolve(input: DuelInput): DuelOutcome {
+  /** The odds, without rolling. Used to decide whether to commit. */
+  estimate(input: DuelInput): DuelEstimate {
     const { tackler, tacklerState, carrier, carrierState, hardTackle } = input;
 
     const mode = this.getMode(carrierState);
@@ -85,15 +89,35 @@ export class TackleDuelService {
       D.CLEAN_SHARE_MAX,
     );
 
+    return { mode, tackleChance, cleanShare, frontness };
+  }
+
+  /** Minimum estimated chance at which this defender will commit. */
+  getCommitThreshold(tackler: Player, nearOwnGoal: boolean): number {
+    let threshold =
+      D.COMMIT_BASE - tackler.attributes.aggression * D.COMMIT_PER_AGGRESSION;
+
+    if (tackler.traits.includes("DIVES_INTO_TACKLES")) {
+      threshold -= D.COMMIT_DIVER_DISCOUNT;
+    }
+
+    if (nearOwnGoal) threshold -= D.COMMIT_DANGER_DISCOUNT;
+
+    return clamp(threshold, D.COMMIT_MIN, D.COMMIT_MAX);
+  }
+
+  resolve(input: DuelInput): DuelOutcome {
+    const estimate = this.estimate(input);
+
     const roll = this.random();
     const result: DuelResult =
-      roll < tackleChance * cleanShare
+      roll < estimate.tackleChance * estimate.cleanShare
         ? "WON"
-        : roll < tackleChance
+        : roll < estimate.tackleChance
           ? "LOOSE"
           : "BEATEN";
 
-    return { result, mode, tackleChance, cleanShare, frontness };
+    return { ...estimate, result };
   }
 
   private getMode(carrierState: PlayerMatchState): DuelMode {

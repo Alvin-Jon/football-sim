@@ -22,6 +22,7 @@ export class InterceptionService {
     defenders: DecisionPlayer[],
     teamId: string,
     ball: BallState,
+    allowRoll = true,
   ): InterceptionResult {
     if (
       defenders.length === 0 ||
@@ -93,23 +94,23 @@ export class InterceptionService {
         0.25 + a.anticipation * 0.02 + a.positioning * 0.01 - ballSpeed * 0.015,
       ));
 
-      if (this.random() <= chance) {
-      const intercepted = this.ballInteractionService.tryControl(
-        defender.player,
-        defender.state,
-        teamId,
-        ball,
-      );
+      if (allowRoll && this.random() <= chance) {
+        const intercepted = this.ballInteractionService.tryControl(
+          defender.player,
+          defender.state,
+          teamId,
+          ball,
+        );
 
-      if (intercepted) {
-        return {
-          intercepted: true,
-          playerId: defender.player.id,
-          interceptionPosition: { ...ball.position },
-          message: "Ball successfully intercepted.",
-        };
+        if (intercepted) {
+          return {
+            intercepted: true,
+            playerId: defender.player.id,
+            interceptionPosition: { ...ball.position },
+            message: "Ball successfully intercepted.",
+          };
+        }
       }
-    }
     }
 
     // Otherwise, move towards the predicted interception point.
