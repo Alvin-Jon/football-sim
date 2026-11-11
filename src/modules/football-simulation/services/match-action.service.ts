@@ -54,6 +54,7 @@ import { FormationPositioningService } from "./formation-positioning.service.js"
 import { TacticsService } from "./tactics.service.js";
 import { TackleDuelService } from "./tackle-duel.service.js";
 import type { DuelOutcome } from "./tackle-duel.service.js";
+import { CarryPlanningService } from "./carry-planning.service.js";
 
 
 interface PendingPass {
@@ -148,6 +149,7 @@ export class MatchActionService {
 
   private readonly goalkeeperSave: GoalkeeperSaveService;
   private readonly tackleDuel: TackleDuelService;
+  private readonly carryPlanner: CarryPlanningService;
   private readonly goalkeeperSaveExecution = new GoalkeeperSaveExecutionService(
     this.ballInteraction,
   );
@@ -175,6 +177,7 @@ export class MatchActionService {
     this.shooting = new ShootingService(this.ballInteraction, random);
     this.goalkeeperSave = new GoalkeeperSaveService(random);
     this.tackleDuel = new TackleDuelService(random);
+    this.carryPlanner = new CarryPlanningService(random);
     this.interception = new InterceptionService(
       this.ballInteraction,
       this.trajectory,
@@ -299,6 +302,7 @@ export class MatchActionService {
   }
 
   private grantPossessionShield(match: MatchState, playerId: string): void {
+    this.carryPlanner.clear(playerId);
     this.possessionStarts.set(playerId, match.tick);
     this.possessionShields.set(
       playerId,
@@ -341,30 +345,27 @@ export class MatchActionService {
     );
   }
 
-  // Carry the ball forward a few metres while waiting to release it.
+  // Carry the ball along a committed, role-capped path while waiting to
+  // release it.
   private carryBall(
+    tick: number,
     player: Player,
     state: PlayerMatchState,
     context: DecisionContext,
   ): void {
     this.cancelRunningAction(player.id, state);
-    state.targetPosition = PitchService.clampPosition(
-      this.positionService.getForwardPosition(
-        state.position,
-        3,
-        context.attackingDirection,
-      ),
-    );
+    state.targetPosition = this.carryPlanner.plan(tick, context);
     state.isMoving = true;
     state.currentAction = "DRIBBLING";
   }
 
   private carryAndReassess(
+    tick: number,
     player: Player,
     state: PlayerMatchState,
     context: DecisionContext,
   ): void {
-    this.carryBall(player, state, context);
+    this.carryBall(tick, player, state, context);
     this.decisionEngine.invalidateDecision(player.id);
   }
 
@@ -1017,7 +1018,7 @@ export class MatchActionService {
       case "THROUGH_BALL":
       case "LONG_BALL":
         if (this.mustKeepBall(match, player.id, context)) {
-          this.carryAndReassess(player, state, context);
+          this.carryAndReassess(match.tick, player, state, context);
           return;
         }
         this.executePass(match, team, teamState, player, state, context, decision);
@@ -1025,7 +1026,7 @@ export class MatchActionService {
 
       case "CROSS":
         if (this.mustKeepBall(match, player.id, context)) {
-          this.carryAndReassess(player, state, context);
+          this.carryAndReassess(match.tick, player, state, context);
           return;
         }
         this.executeCross(match, team, player, state, context, decision);
@@ -1033,7 +1034,7 @@ export class MatchActionService {
 
       case "SHOOT":
         if (this.mustKeepBall(match, player.id, context)) {
-          this.carryAndReassess(player, state, context);
+          this.carryAndReassess(match.tick, player, state, context);
           return;
         }
         this.executeShot(match, team, player, state, context);

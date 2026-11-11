@@ -19,10 +19,12 @@ import type { FormationSlot } from "../types/formation.types.js";
 import type { FormationFluidity } from "../types/formation.types.js";
 import { TacticsService } from "./tactics.service.js";
 import { PITCH_DIMENSIONS } from "../constants/pitch.constants.js";
+import { CarryPlanningService } from "./carry-planning.service.js";
 
 
 export class DecisionEngineService {
   private static readonly TEMPO_SCALE = 1;
+  private static readonly CARRY_WEIGHT = 10;
   private static readonly SUPPORT_COUNT = 3;
 
   private static readonly SHAPE_BONUS = 30;
@@ -38,6 +40,7 @@ export class DecisionEngineService {
   private readonly persistenceService = new DecisionPersistenceService();
   private readonly dribbleEvaluationService = new DribbleEvaluationService();
   private readonly shootingEvaluationService = new ShootingEvaluationService();
+  private readonly carryPlanner = new CarryPlanningService();
 
   private generateOnBallActions(
     context: DecisionContext,
@@ -60,26 +63,14 @@ export class DecisionEngineService {
       reasoning: ["Player has possession"],
     });
 
-    // Dribbling: straight ahead, or diagonally towards space on either side.
-    const attackSign = this.positionService.getAttackSign(
-      context.attackingDirection,
-    );
-
-    const dribbleOptions = [
-      { forward: 10, lateral: 0, reasoning: "Run at goal with the ball" },
-      { forward: 8, lateral: -7, reasoning: "Carry the ball into space on one side" },
-      { forward: 8, lateral: 7, reasoning: "Carry the ball into space on the other side" },
-    ];
-
-    for (const option of dribbleOptions) {
+    // The planner proposes role-capped carry directions.
+    for (const option of this.carryPlanner.getOptions(context)) {
       candidates.push({
         action: "DRIBBLE",
         score: 0,
-        targetPosition: PitchService.clampPosition({
-          x: playerPosition.x + attackSign * option.forward,
-          y: playerPosition.y + option.lateral,
-        }),
-        reasoning: [option.reasoning],
+        targetPosition: option.target,
+        carryScore: option.score,
+        reasoning: [option.reason],
       });
     }
 
@@ -382,7 +373,8 @@ export class DecisionEngineService {
       );
     }
 
-    const scale = DecisionEngineService.TEMPO_SCALE;
+    const scale =
+      DecisionEngineService.TEMPO_SCALE * this.carryPlanner.getAppetite(context);
     if (nearest >= 6) return -32 * scale;
     if (nearest >= 4) return -20 * scale;
     if (nearest >= 2.5) return -8 * scale;
@@ -522,6 +514,12 @@ export class DecisionEngineService {
             candidate,
           );
 
+        const carryBonus =
+          candidate.action === "DRIBBLE"
+            ? (candidate.carryScore ?? 0) *
+              DecisionEngineService.CARRY_WEIGHT
+            : 0;
+
         return {
           ...candidate,
           score:
@@ -533,7 +531,8 @@ export class DecisionEngineService {
             dribbleScore +
             tempoBias +
             shootScore +
-            positionScore,
+            positionScore +
+            carryBonus,
         };
       },
     );

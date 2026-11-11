@@ -9,6 +9,21 @@ import type {
 import type { Vector2D } from "../types/pitch.types.js";
 
 export class PlayerMovementService {
+  // Turning: how fast a moving player can change heading (radians/second).
+  // The rate shrinks as speed rises, so sprinters swing wide and slow players
+  // pivot sharply. Agility raises the rate.
+  private static readonly BASE_TURN_RATE = 3;
+  private static readonly AGILITY_TURN_RATE = 4;
+  private static readonly TURN_SPEED_PENALTY = 0.6;
+  // Below this speed the player may turn freely.
+  private static readonly TURN_MIN_SPEED = 1;
+  // How much desired speed is shed on a full 180 degree turn.
+  private static readonly TURN_SPEED_LOSS = 1;
+
+  // Ball carriers run slightly slower than the same player without the ball.
+  private static readonly CARRY_SPEED_BASE = 0.9;
+  private static readonly CARRY_SPEED_DRIBBLING = 0.08;
+
   private static clamp(
     value: number,
     min: number,
@@ -66,6 +81,68 @@ export class PlayerMovementService {
       (1 - MIN_STAMINA_MULTIPLIER);
   }
 
+  // Speed multiplier while carrying the ball. state.currentAction is still
+  // "DRIBBLING" from the previous tick's action step when this runs.
+  private static getCarryMultiplier(
+    player: Player,
+    state: PlayerMatchState,
+  ): number {
+    if (state.currentAction !== "DRIBBLING") return 1;
+
+    return (
+      this.CARRY_SPEED_BASE +
+      this.CARRY_SPEED_DRIBBLING * (player.attributes.dribbling / 20)
+    );
+  }
+
+  // Rotates the desired velocity toward the current heading so a moving
+  // player curves into a new direction instead of snapping to it, and sheds
+  // a little speed on sharp turns.
+  private static limitTurn(
+    player: Player,
+    state: PlayerMatchState,
+    desired: Vector2D,
+    dt: number,
+  ): Vector2D {
+    const desiredSpeed = this.magnitude(desired);
+    const currentSpeed = this.magnitude(state.velocity);
+
+    if (desiredSpeed < 0.01 || currentSpeed < this.TURN_MIN_SPEED) {
+      return desired;
+    }
+
+    const currentHeading = Math.atan2(state.velocity.y, state.velocity.x);
+    const desiredHeading = Math.atan2(desired.y, desired.x);
+
+    // Signed difference wrapped to [-PI, PI].
+    const raw = desiredHeading - currentHeading;
+    const difference = Math.atan2(Math.sin(raw), Math.cos(raw));
+
+    const agility = player.attributes.agility / 20;
+    const speedRatio = this.clamp(
+      currentSpeed / this.getMaximumSpeed(player),
+      0,
+      1,
+    );
+
+    const turnRate =
+      (this.BASE_TURN_RATE + this.AGILITY_TURN_RATE * agility) *
+      (1 - this.TURN_SPEED_PENALTY * speedRatio);
+
+    const maximumTurn = turnRate * dt;
+    const heading =
+      currentHeading + this.clamp(difference, -maximumTurn, maximumTurn);
+
+    const speed =
+      desiredSpeed *
+      (1 - this.TURN_SPEED_LOSS * (Math.abs(difference) / Math.PI));
+
+    return {
+      x: Math.cos(heading) * speed,
+      y: Math.sin(heading) * speed,
+    };
+  }
+
   static updateMovement(
     player: Player,
     state: PlayerMatchState,
@@ -102,7 +179,8 @@ export class PlayerMovementService {
 
         const maximumSpeed =
           this.getMaximumSpeed(player) *
-          this.getStaminaMultiplier(state.stamina);
+          this.getStaminaMultiplier(state.stamina) *
+          this.getCarryMultiplier(player, state);
 
         const desiredSpeed = Math.min(
           maximumSpeed,
@@ -119,6 +197,13 @@ export class PlayerMovementService {
         };
       }
     }
+
+    desiredVelocity = this.limitTurn(
+      player,
+      state,
+      desiredVelocity,
+      dt,
+    );
 
     const velocityDifference = {
       x: desiredVelocity.x - currentVelocity.x,

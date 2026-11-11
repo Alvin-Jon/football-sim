@@ -26,6 +26,7 @@ export interface DecisionCandidate {
   score: number;
   targetPosition?: Vector2D;
   targetPlayerId?: string;
+  carryScore?: number;
   reasoning: string[];
 }
 

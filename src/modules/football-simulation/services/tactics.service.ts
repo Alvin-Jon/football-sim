@@ -482,12 +482,9 @@ export class TacticsService {
     }
   }
 
-  // Scales the minimum time a carrier keeps the ball.
   static scaleHoldTicks(ticks: number, tactics: TacticalModifiers): number {
     return Math.max(1, Math.round(ticks * tactics.holdTempo));
   }
-
-  // ---------------------------------------------------------------------
 
   private static apply(
     target: Mutable<TacticalModifiers>,
