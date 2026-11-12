@@ -25,6 +25,7 @@ import { DUEL_CONSTANTS } from "../constants/duel.constants.js";
 import { INTERCEPTION_CONSTANTS } from "../constants/interception.constants.js";
 import { PITCH_DIMENSIONS } from "../constants/pitch.constants.js";
 import { RECEIVING_CONSTANTS } from "../constants/receiving.constants.js";
+import { DIVE_CONSTANTS } from "../constants/goalkeeper-dive.constants.js";
 import { ActionEngineService } from "./action-engine.service.js";
 import { BallInteractionService } from "./ball-interaction.service.js";
 import { BallPhysicsService } from "./ball-physics.service.js";
@@ -73,6 +74,7 @@ interface PendingShot {
   tick: number;
   onTarget: boolean;
   keeperDived?: boolean;
+  firstDiveGap?: number;
   rollChance?: number;
   rollSucceeded?: boolean;
 }
@@ -108,6 +110,7 @@ export class MatchActionService {
   private static readonly PASSER_EXCLUSION_TICKS = 30;
   private static readonly TACKLE_COOLDOWN_TICKS = 120;
   private static readonly CONTEST_INTERVAL_TICKS = 8;
+  private static readonly OPPONENT_CONTEST_SCALE = 0.45;
   private static readonly POSSESSION_SHIELD_TICKS = 20;
   private static readonly MIN_HOLD_TICKS = 60;
   private static readonly PRESSURE_HOLD_TICKS = 10;
@@ -209,6 +212,7 @@ export class MatchActionService {
           match.awayTeam,
           match.awayTeamState,
           match.homeDirection,
+          deltaTime,
         ),
       () =>
         this.updateGoalkeeper(
@@ -218,6 +222,7 @@ export class MatchActionService {
           match.homeTeam,
           match.homeTeamState,
           match.awayDirection,
+          deltaTime,
         ),
     ];
     this.shuffle(keepers);
@@ -419,6 +424,14 @@ export class MatchActionService {
     return true;
   }
 
+  private contestScale(match: MatchState, teamId: string): number {
+    const pending = this.pendingPasses.get(match.id);
+
+    return pending && pending.teamId !== teamId
+      ? MatchActionService.OPPONENT_CONTEST_SCALE
+      : 1;
+  }
+
   private clearPassContestTicks(matchId: string): void {
     const prefix = `${matchId}:`;
     for (const key of this.contestTicks.keys()) {
@@ -540,6 +553,7 @@ export class MatchActionService {
         teamId,
         match.ball,
         chasers.has(player.id),
+        this.contestScale(match, teamId),
       );
 
       if (receiveResult.outcome === "MISCONTROLLED") {
@@ -565,6 +579,7 @@ export class MatchActionService {
     opponents: Team,
     opponentState: TeamMatchState,
     direction: PlayingDirection,
+    deltaTime: number,
   ): void {
     const goalkeeper = team.players.find((player) => player.position === "GK");
     if (!goalkeeper) return;
@@ -585,9 +600,26 @@ export class MatchActionService {
     const decision = this.goalkeeperDecision.decide(context);
     if (decision.action === "DIVE") {
       const shot = this.pendingShots.get(match.id);
-      if (shot && shot.teamId !== team.id) shot.keeperDived = true;
+      if (shot && shot.teamId !== team.id) {
+        shot.keeperDived = true;
+
+        if (shot.firstDiveGap === undefined && decision.targetPosition) {
+          shot.firstDiveGap = PitchService.getDistance(
+            state.position,
+            decision.targetPosition,
+          );
+        }
+      }
     }
     this.goalkeeperAction.execute(state, decision);
+    if (decision.action === "DIVE" && decision.targetPosition) {
+      this.goalkeeperAction.dive(
+        state,
+        decision.targetPosition,
+        goalkeeper.attributes.reflexes,
+        deltaTime,
+      );
+    }
 
     if (decision.action === "DISTRIBUTE") {
       this.distributeGoalkeeperBall(
@@ -634,14 +666,18 @@ export class MatchActionService {
       context,
       match.ball,
     );
+    const effectiveShot =
+      predictedShot && decision.targetPosition
+        ? { ...predictedShot, crossingPosition: decision.targetPosition }
+        : predictedShot;
 
-    if (predictedShot?.isOnTarget) {
+    if (effectiveShot?.isOnTarget) {
       if (
         !this.rollShotSave(
           match,
           goalkeeper.id,
           context,
-          predictedShot,
+          effectiveShot,
           decision.saveType,
         )
       ) {
@@ -1007,7 +1043,9 @@ export class MatchActionService {
           [{ player, state }],
           team.id,
           match.ball,
-          !inRange || this.mayContestPass(match, player.id, team.id),
+          !inRange || this.mayContestPass(match, player.id, team.id)
+            ? this.contestScale(match, team.id)
+            : 0,
         );
 
         return;
@@ -1804,15 +1842,32 @@ export class MatchActionService {
 
         if (liveShot || MatchActionService.ALLOW_NON_SHOT_GOALS) {
           if (liveShot) {
-            const defendingTeamId =
-              scoringTeamId === match.homeTeam.id
-                ? match.awayTeam.id
-                : match.homeTeam.id;
+            const scoredByHome = scoringTeamId === match.homeTeam.id;
+            const defendingTeam = scoredByHome ? match.awayTeam : match.homeTeam;
+            const defendingState = scoredByHome
+              ? match.awayTeamState
+              : match.homeTeamState;
+            const goalkeeper = defendingTeam.players.find(
+              (player) => player.position === "GK",
+            );
+            const goalkeeperState = goalkeeper
+              ? defendingState.playerStates[goalkeeper.id]
+              : undefined;
+            const gap = goalkeeperState
+              ? PitchService.getDistance(goalkeeperState.position, {
+                  x: goalX,
+                  y: crossingY,
+                })
+              : undefined;
+
             const outcome: KeeperShotOutcome = !liveShot.onTarget
               ? "GOAL_UNPREDICTED"
               : liveShot.rollSucceeded === undefined
                 ? liveShot.keeperDived
-                  ? "GOAL_NO_REACH"
+                  ? liveShot.firstDiveGap !== undefined &&
+                    liveShot.firstDiveGap > DIVE_CONSTANTS.MAX_DIVE_DISTANCE
+                    ? "GOAL_DIVE_TOO_FAR"
+                    : "GOAL_DIVE_TOO_LATE"
                   : "GOAL_NO_ATTEMPT"
                 : liveShot.rollSucceeded
                   ? "GOAL_NO_CONTACT"
@@ -1820,9 +1875,10 @@ export class MatchActionService {
 
             MatchStatisticsService.recordKeeperShot(
               match,
-              defendingTeamId,
+              defendingTeam.id,
               outcome,
               liveShot.rollChance,
+              gap,
             );
           }
 

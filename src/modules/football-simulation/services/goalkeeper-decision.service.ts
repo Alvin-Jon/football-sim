@@ -5,6 +5,10 @@ import type {
 import type { Vector2D } from "../types/pitch.types.js";
 
 import { GOALKEEPER_CONSTANTS } from "../constants/goalkeeper.constants.js";
+import {
+  DIVE_CONSTANTS,
+  getDiveSpeed,
+} from "../constants/goalkeeper-dive.constants.js";
 
 import { GoalkeeperPositioningService } from "./goalkeeper-positioning.service.js";
 import { GoalkeeperPredictionService } from "./goalkeeper-prediction.service.js";
@@ -65,14 +69,27 @@ export class GoalkeeperDecisionService {
     if (predictedShot?.isOnTarget) {
       reasoning.push("Ball trajectory is heading towards goal.");
 
+      // Where along the ball's path can he meet it? Not only where it will
+      // cross the goal line: a keeper who has come out can meet it earlier.
+      const intercept = this.predictionService.findInterceptPoint(
+        context,
+        ball,
+        getDiveSpeed(goalkeeper.attributes.reflexes, goalkeeper.stamina),
+        DIVE_CONSTANTS.MAX_DIVE_DISTANCE +
+          GOALKEEPER_CONSTANTS.SAVE_REACH_RADIUS,
+        predictedShot.timeToGoal,
+      );
+
+      const saveTarget = intercept?.position ?? predictedShot.crossingPosition;
+
       const distance = PitchService.getDistance(
         goalkeeper.position,
-        predictedShot.crossingPosition,
+        saveTarget,
       );
 
       if (distance > GOALKEEPER_CONSTANTS.SAVE_REACH_RADIUS) {
         return baseDecision("DIVE", {
-          targetPosition: predictedShot.crossingPosition,
+          targetPosition: saveTarget,
         });
       }
 
@@ -85,7 +102,7 @@ export class GoalkeeperDecisionService {
 
       return baseDecision(saveType, {
         saveType,
-        targetPosition: predictedShot.crossingPosition,
+        targetPosition: saveTarget,
       });
     }
 
@@ -183,7 +200,7 @@ export class GoalkeeperDecisionService {
     if (distance <= max) return position;
 
     const ratio = max / distance;
- 
+
     return {
       x: goal.x + dx * ratio,
       y: goal.y + dy * ratio,

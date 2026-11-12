@@ -149,7 +149,8 @@ export function getPredictionBucket(probability: number): PredictionBucket {
 export type KeeperShotOutcome =
   | "SAVED"
   | "GOAL_NO_ATTEMPT" // he never even tried to move for it
-  | "GOAL_NO_REACH" // he was sent diving but could not get within save reach
+  | "GOAL_DIVE_TOO_FAR" // the crossing point was beyond his dive range from the start
+  | "GOAL_DIVE_TOO_LATE" // in range, but the shot arrived before he did
   | "GOAL_ROLL_FAILED" // within reach; the save roll failed
   | "GOAL_NO_CONTACT" // roll succeeded but he never got to the ball
   | "GOAL_UNPREDICTED"; // the shot was not predicted on target (deflection etc.)
@@ -157,7 +158,8 @@ export type KeeperShotOutcome =
 export const KEEPER_SHOT_OUTCOMES: readonly KeeperShotOutcome[] = [
   "SAVED",
   "GOAL_NO_ATTEMPT",
-  "GOAL_NO_REACH",
+  "GOAL_DIVE_TOO_FAR",
+  "GOAL_DIVE_TOO_LATE",
   "GOAL_ROLL_FAILED",
   "GOAL_NO_CONTACT",
   "GOAL_UNPREDICTED",
@@ -169,7 +171,8 @@ export function createKeeperShotBreakdown(): KeeperShotBreakdown {
   return {
     SAVED: 0,
     GOAL_NO_ATTEMPT: 0,
-    GOAL_NO_REACH: 0,
+    GOAL_DIVE_TOO_FAR: 0,
+    GOAL_DIVE_TOO_LATE: 0,
     GOAL_ROLL_FAILED: 0,
     GOAL_NO_CONTACT: 0,
     GOAL_UNPREDICTED: 0,
@@ -186,6 +189,9 @@ export interface TeamMatchStatistics {
   passCalibration: PassCalibration;
 
   keeperShots: KeeperShotBreakdown;
+  // Sum of the keeper's distance (m) from the crossing point when each goal
+  // went in, per outcome.
+  keeperGapSum: KeeperShotBreakdown;
   saveRolls: number;
   saveRollChanceSum: number;
 
@@ -242,6 +248,7 @@ export function createTeamStatistics(): TeamMatchStatistics {
     passCalibration: createPassCalibration(),
 
     keeperShots: createKeeperShotBreakdown(),
+    keeperGapSum: createKeeperShotBreakdown(),
     saveRolls: 0,
     saveRollChanceSum: 0,
 

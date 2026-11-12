@@ -47,6 +47,7 @@ attemptReceive(
   teamId: string,
   ball: BallState,
   allowChase = true,
+  chanceScale = 1,
 ): ReceivingResult {
   const distance = PitchService.getDistance(playerState.position, ball.position);
 
@@ -76,7 +77,8 @@ attemptReceive(
     return this.result(player.id, "NOT_READY", 0, distance);
   }
 
-  const controlChance = this.calculateControlChance(player, ball);
+  const controlChance =
+    this.calculateControlChance(player, ball) * chanceScale;
 
   if (this.random() > controlChance) {
     return this.result(player.id, "MISCONTROLLED", controlChance, distance);

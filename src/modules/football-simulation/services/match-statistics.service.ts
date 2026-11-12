@@ -106,10 +106,15 @@ export class MatchStatisticsService {
     defendingTeamId: string,
     outcome: KeeperShotOutcome,
     rollChance?: number,
+    gapAtGoal?: number,
   ): void {
     const team = this.getTeamStatistics(match, defendingTeamId);
 
     team.keeperShots[outcome]++;
+
+    if (gapAtGoal !== undefined) {
+      team.keeperGapSum[outcome] += gapAtGoal;
+    }
 
     if (rollChance !== undefined) {
       team.saveRolls++;

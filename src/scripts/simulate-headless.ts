@@ -16,6 +16,11 @@ import type {
   PassFailureReason,
   PassKind,
 } from "../modules/football-simulation/types/statistics.types.js";
+import type {
+  Team,
+  TeamMentality,
+  TeamStyle,
+} from "../modules/football-simulation/types/team.types.js";
 import { BAYVIEW, MANFIELD } from "../db/teams/index.js";
 
 const MATCHES = Number(process.argv[2] ?? 3);
@@ -121,8 +126,58 @@ const passMix = Object.fromEntries(
   ]),
 ) as Record<PassKind, PassMixEntry>;
 
+// Totals per side (home / away), to compare tactics head to head.
+interface SideTotals {
+  label: string;
+  matches: number;
+  possessionSeconds: number;
+  kinds: Record<PassKind, { attempted: number; completed: number }>;
+  interceptionsMade: number;
+  tackles: number;
+  shots: number;
+  goals: number;
+}
+
+const emptySide = (): SideTotals => ({
+  label: "",
+  matches: 0,
+  possessionSeconds: 0,
+  kinds: emptyKinds(),
+  interceptionsMade: 0,
+  tackles: 0,
+  shots: 0,
+  goals: 0,
+});
+
+const sides = { home: emptySide(), away: emptySide() };
+
+function collectSides(match: Match): void {
+  for (const [key, team, stats] of [
+    ["home", match.homeTeam, match.statistics.home],
+    ["away", match.awayTeam, match.statistics.away],
+  ] as const) {
+    const side = sides[key];
+
+    side.label = `${team.name} (${team.tactics.style} / ${team.tactics.mentality})`;
+    side.matches++;
+    side.possessionSeconds += stats.possessionSeconds;
+    side.interceptionsMade += stats.interceptions;
+    side.tackles += stats.tacklesAttempted;
+    side.shots += stats.shots;
+    side.goals += stats.goals;
+
+    for (const kind of PASS_KINDS) {
+      side.kinds[kind].attempted += stats.passBreakdown[kind].attempted;
+      side.kinds[kind].completed += stats.passBreakdown[kind].completed;
+    }
+  }
+}
+
 // What keepers did with shots that ended as a save or a goal.
 const keeperTotals = Object.fromEntries(
+  KEEPER_SHOT_OUTCOMES.map((outcome) => [outcome, 0]),
+) as Record<(typeof KEEPER_SHOT_OUTCOMES)[number], number>;
+const keeperGapTotals = Object.fromEntries(
   KEEPER_SHOT_OUTCOMES.map((outcome) => [outcome, 0]),
 ) as Record<(typeof KEEPER_SHOT_OUTCOMES)[number], number>;
 let keeperRolls = 0;
@@ -132,6 +187,7 @@ function collectKeeper(match: Match): void {
   for (const team of [match.statistics.home, match.statistics.away]) {
     for (const outcome of KEEPER_SHOT_OUTCOMES) {
       keeperTotals[outcome] += team.keeperShots[outcome];
+      keeperGapTotals[outcome] += team.keeperGapSum[outcome];
     }
     keeperRolls += team.saveRolls;
     keeperRollChanceSum += team.saveRollChanceSum;
@@ -187,6 +243,66 @@ function collectPassMix(match: Match): void {
   }
 }
 
+// Override a side's tactics from the environment, e.g.
+//   HOME_STYLE=TIKI_TAKA AWAY_STYLE=DIRECT npm run simulate-h -- 10 1
+// (also HOME_MENTALITY / AWAY_MENTALITY).
+const TEAM_STYLES: readonly TeamStyle[] = [
+  "POSSESSION",
+  "TIKI_TAKA",
+  "GEGENPRESS",
+  "COUNTER_ATTACKING",
+  "DIRECT",
+  "WING_PLAY",
+];
+const TEAM_MENTALITIES: readonly TeamMentality[] = [
+  "VERY_DEFENSIVE",
+  "DEFENSIVE",
+  "BALANCED",
+  "ATTACKING",
+  "VERY_ATTACKING",
+];
+
+function isTeamStyle(value: string): value is TeamStyle {
+  return TEAM_STYLES.some((style) => style === value);
+}
+
+function isTeamMentality(value: string): value is TeamMentality {
+  return TEAM_MENTALITIES.some((mentality) => mentality === value);
+}
+
+function withTactics(
+  team: Team,
+  prefix: "HOME" | "AWAY",
+): Team {
+  const style = process.env[`${prefix}_STYLE`];
+  const mentality = process.env[`${prefix}_MENTALITY`];
+  let selectedStyle: TeamStyle | undefined;
+  let selectedMentality: TeamMentality | undefined;
+
+  if (!style && !mentality) return team;
+  if (style) {
+    if (!isTeamStyle(style)) {
+      throw new Error(`Invalid ${prefix}_STYLE: ${style}`);
+    }
+    selectedStyle = style;
+  }
+  if (mentality) {
+    if (!isTeamMentality(mentality)) {
+      throw new Error(`Invalid ${prefix}_MENTALITY: ${mentality}`);
+    }
+    selectedMentality = mentality;
+  }
+
+  return {
+    ...team,
+    tactics: {
+      ...team.tactics,
+      ...(selectedStyle && { style: selectedStyle }),
+      ...(selectedMentality && { mentality: selectedMentality }),
+    },
+  };
+}
+
 function playMatch(index: number): Match {
   const engine = new MatchEngineService(
     TICK_RATE,
@@ -195,8 +311,8 @@ function playMatch(index: number): Match {
 
   let match = MatchInitializationService.initialize(
     `headless-${index}`,
-    SWAP ? MANFIELD : BAYVIEW,
-    SWAP ? BAYVIEW : MANFIELD,
+    withTactics(SWAP ? MANFIELD : BAYVIEW, "HOME"),
+    withTactics(SWAP ? BAYVIEW : MANFIELD, "AWAY"),
   );
 
   match = engine.start(match);
@@ -269,6 +385,7 @@ for (let index = 0; index < MATCHES; index++) {
   collect(match);
   collectPassMix(match);
   collectKeeper(match);
+  collectSides(match);
 
   const { home, away } = match.statistics;
   const homeDuels = sumDuels(home.duelBreakdown);
@@ -458,19 +575,67 @@ console.table(
 
   console.log(
     "\nKEEPERS: what happened to shots that ended as a save or a goal\n" +
-      "(NO_ATTEMPT = never moved for it, NO_REACH = sent diving but too far,\n" +
-      "ROLL_FAILED = in reach but the save roll failed, NO_CONTACT = roll\n" +
-      "succeeded but he never reached the ball, UNPREDICTED = not seen as on target)",
+      "(NO_ATTEMPT = never moved for it, DIVE_TOO_FAR = crossing point beyond\n" +
+      "dive range, DIVE_TOO_LATE = in range but the shot beat him,\n" +
+      "ROLL_FAILED = in reach but the roll failed,\n" +
+      "NO_CONTACT = roll succeeded but he never reached the ball,\n" +
+      "UNPREDICTED = not seen as on target; gap = his distance from where the\n" +
+      "ball crossed, in metres)",
   );
   console.table(
     KEEPER_SHOT_OUTCOMES.map((outcome) => ({
       outcome,
       count: keeperTotals[outcome],
       share: pct(keeperTotals[outcome], total),
+      "avg gap (m)":
+        outcome === "SAVED" || keeperTotals[outcome] === 0
+          ? "-"
+          : (keeperGapTotals[outcome] / keeperTotals[outcome]).toFixed(1),
     })),
   );
   console.log(
     `save rolls: ${keeperRolls}, average save chance on those rolls: ` +
       `${keeperRolls === 0 ? "-" : Math.round((keeperRollChanceSum / keeperRolls) * 100) + "%"}`,
+  );
+}
+
+{
+  const totalPossession =
+    sides.home.possessionSeconds + sides.away.possessionSeconds;
+
+  const attempts = (side: SideTotals): number =>
+    PASS_KINDS.reduce((sum, kind) => sum + side.kinds[kind].attempted, 0);
+  const completed = (side: SideTotals): number =>
+    PASS_KINDS.reduce((sum, kind) => sum + side.kinds[kind].completed, 0);
+
+  console.log(
+    "\nTACTICS, HOME vs AWAY (totals over all matches)\n" +
+      "(change tactics with HOME_STYLE / AWAY_STYLE / HOME_MENTALITY / AWAY_MENTALITY;\n" +
+      "'int. suffered' = the OTHER side's interceptions per 100 of this side's passes)",
+  );
+  console.table(
+    (["home", "away"] as const).map((key) => {
+      const side = sides[key];
+      const other = sides[key === "home" ? "away" : "home"];
+      const total = attempts(side);
+      const matches = Math.max(1, side.matches);
+
+      return {
+        side: key,
+        team: side.label,
+        "possession %": pct(side.possessionSeconds, totalPossession),
+        "passes/match": Math.round(total / matches),
+        "completed %": pct(completed(side), total),
+        "short %": pct(side.kinds.SHORT.attempted, total),
+        "through %": pct(side.kinds.THROUGH.attempted, total),
+        "long %": pct(side.kinds.LONG.attempted, total),
+        "cross %": pct(side.kinds.CROSS.attempted, total),
+        "int. suffered /100": total
+          ? ((other.interceptionsMade / total) * 100).toFixed(1)
+          : "-",
+        "shots/match": (side.shots / matches).toFixed(1),
+        "goals/match": (side.goals / matches).toFixed(1),
+      };
+    }),
   );
 }

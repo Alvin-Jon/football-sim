@@ -22,7 +22,7 @@ export class InterceptionService {
     defenders: DecisionPlayer[],
     teamId: string,
     ball: BallState,
-    allowRoll = true,
+    rollScale = 1,
   ): InterceptionResult {
     if (
       defenders.length === 0 ||
@@ -94,7 +94,7 @@ export class InterceptionService {
         0.25 + a.anticipation * 0.02 + a.positioning * 0.01 - ballSpeed * 0.015,
       ));
 
-      if (allowRoll && this.random() <= chance) {
+      if (rollScale > 0 && this.random() <= chance * rollScale) {
         const intercepted = this.ballInteractionService.tryControl(
           defender.player,
           defender.state,

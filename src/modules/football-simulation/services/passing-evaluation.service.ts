@@ -18,6 +18,8 @@ import { ReceivingService } from "./receiving.service.js";
 import { TacticsService } from "./tactics.service.js";
 import { calculatePressure } from "../utils/pressure.utils.js";
 import { PassPredictionStore } from "../utils/pass-prediction.store.js";
+import { PositionInfluenceService } from "./position-influence.service.js";
+import type { PlayerRole } from "./position-influence.service.js";
 
 const clamp = (v: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, v));
@@ -54,8 +56,8 @@ export class PassingEvaluationService {
     // lane danger was far too high (passes it rated under 50% completed 71%
     // of the time) and there is a floor of lane losses even on clear passes
     // (about 10%). lane = AMBIENT + (1 - AMBIENT) * LETHALITY * modelBlock.
-    LANE_LETHALITY: 0.2,
-    AMBIENT_LANE_RISK: 0.1,
+    LANE_LETHALITY: 0.1,
+    AMBIENT_LANE_RISK: 0.06,
     // Failures the evaluator does not model: recollected by the passer,
     // overhit out of play.
     AMBIENT_OTHER_FAILURE: 0.08,
@@ -71,8 +73,21 @@ export class PassingEvaluationService {
   // this they crowd out simple passes. Tune with the PASS MIX table.
   private static readonly TYPE_PREFERENCE: Record<PassType, number> = {
     SHORT: 6,
-    THROUGH: -5,
+    THROUGH: -12,
     LONG: -6,
+  };
+
+  // Attackers were passing far more than defenders (strikers about 79 passes
+  // a match against about 29 for centre backs). A small preference for who
+  // RECEIVES the pass spreads the ball around: positive = more passes to him.
+  private static readonly RECEIVER_ROLE_PREFERENCE: Record<PlayerRole, number> = {
+    CENTRE_BACK: 3,
+    FULL_BACK: 1,
+    DEFENSIVE_MID: 2,
+    CENTRAL_MID: 0,
+    ATTACKING_MID: -3,
+    WINGER: -6,
+    STRIKER: -10,
   };
 
   private readonly positionService = new DecisionPositionService();
@@ -228,7 +243,10 @@ export class PassingEvaluationService {
       fit +
       space +
       urgency +
-      PassingEvaluationService.TYPE_PREFERENCE[passType];
+      PassingEvaluationService.TYPE_PREFERENCE[passType] +
+      PassingEvaluationService.RECEIVER_ROLE_PREFERENCE[
+        PositionInfluenceService.getRole(receiver.player.position)
+      ];
 
     // A soft floor (a multiplier would make negative scores BETTER).
     const shortfall = Math.max(0, t.passMinCompletion - pPerceived);
