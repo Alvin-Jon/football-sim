@@ -15,6 +15,15 @@ export const DIVE_CONSTANTS = {
   REACTION_TIME: 0.15,
 } as const;
 
+// Where a keeper stands when he comes out at an attacker: on the line
+// between the attacker and the middle of the goal (so he covers the shot),
+// a fraction of the way out, never further than MAX_OUT.
+export const RUSH_POSITIONING = {
+  FRACTION: 0.4,
+  MIN_OUT: 2,
+  MAX_OUT: 8,
+} as const;
+
 export function getDiveSpeed(reflexes: number, stamina: number): number {
   const speed = Math.max(
     DIVE_CONSTANTS.MIN_DIVE_SPEED,

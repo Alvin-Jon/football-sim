@@ -7,6 +7,7 @@ import type { Vector2D } from "../types/pitch.types.js";
 import { GOALKEEPER_CONSTANTS } from "../constants/goalkeeper.constants.js";
 import {
   DIVE_CONSTANTS,
+  RUSH_POSITIONING,
   getDiveSpeed,
 } from "../constants/goalkeeper-dive.constants.js";
 
@@ -132,7 +133,7 @@ export class GoalkeeperDecisionService {
         reasoning.push("Attacker with the ball approaching the goalkeeper.");
 
         return baseDecision("RUSH_OUT", {
-          targetPosition: this.limitFromGoal(carrier.position, context),
+          targetPosition: this.getRushPosition(carrier.position, context),
           targetPlayerId: carrier.playerId,
         });
       }
@@ -186,8 +187,11 @@ export class GoalkeeperDecisionService {
     return baseDecision("HOLD_POSITION");
   }
 
-  // Keeps a rush target within MAX_RUSH_FROM_GOAL of the goal.
-  private limitFromGoal(
+  // Stand on the line between the carrier and the middle of the goal, not
+  // on the carrier himself. A keeper standing on the ball left the whole
+  // goal open (goals were going in with him an average of 11-12 m from where
+  // the ball crossed the line).
+  private getRushPosition(
     position: Vector2D,
     context: GoalkeeperContext,
   ): Vector2D {
@@ -195,11 +199,18 @@ export class GoalkeeperDecisionService {
     const dx = position.x - goal.x;
     const dy = position.y - goal.y;
     const distance = Math.hypot(dx, dy);
-    const max = GOALKEEPER_CONSTANTS.MAX_RUSH_FROM_GOAL;
 
-    if (distance <= max) return position;
+    if (distance < 0.01) return goal;
 
-    const ratio = max / distance;
+    const out = Math.max(
+      RUSH_POSITIONING.MIN_OUT,
+      Math.min(
+        RUSH_POSITIONING.MAX_OUT,
+        distance * RUSH_POSITIONING.FRACTION,
+        GOALKEEPER_CONSTANTS.MAX_RUSH_FROM_GOAL,
+      ),
+    );
+    const ratio = out / distance;
 
     return {
       x: goal.x + dx * ratio,

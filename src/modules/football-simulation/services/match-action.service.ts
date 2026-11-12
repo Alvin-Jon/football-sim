@@ -77,6 +77,8 @@ interface PendingShot {
   firstDiveGap?: number;
   rollChance?: number;
   rollSucceeded?: boolean;
+  shotDistance?: number;
+  keeperOut?: number;
 }
 
 interface LastCompletedPass {
@@ -1301,6 +1303,13 @@ export class MatchActionService {
         predictedShot?.isOnTarget ?? false,
       );
 
+      MatchStatisticsService.recordShotByDistance(
+        match,
+        team.id,
+        PitchService.getDistance(state.position, context.goalPosition),
+        predictedShot?.isOnTarget ?? false,
+      );
+
       const lastPass = this.lastCompletedPasses.get(match.id);
 
       const assistPlayerId =
@@ -1318,6 +1327,10 @@ export class MatchActionService {
         assistPlayerId,
         tick: match.tick,
         onTarget: predictedShot?.isOnTarget ?? false,
+        shotDistance: PitchService.getDistance(state.position, context.goalPosition),
+        ...(goalkeeperState && {
+          keeperOut: Math.abs(goalkeeperState.position.x - context.goalPosition.x),
+        }),
       });
     }
   }
@@ -1745,11 +1758,14 @@ export class MatchActionService {
     ) {
       MatchStatisticsService.recordSave(match, teamId, goalkeeperId);
       MatchStatisticsService.recordKeeperShot(
-        match,
-        teamId,
-        "SAVED",
-        shot.rollChance,
-      );
+          match,
+          teamId,
+          "SAVED",
+          shot.rollChance,
+          undefined,
+          shot.keeperOut,
+          shot.shotDistance,
+        );
       this.pendingShots.delete(match.id);
     }
   }
@@ -1873,13 +1889,23 @@ export class MatchActionService {
                   ? "GOAL_NO_CONTACT"
                   : "GOAL_ROLL_FAILED";
 
-            MatchStatisticsService.recordKeeperShot(
-              match,
-              defendingTeam.id,
-              outcome,
-              liveShot.rollChance,
-              gap,
-            );
+              MatchStatisticsService.recordKeeperShot(
+                match,
+                defendingTeam.id,
+                outcome,
+                liveShot.rollChance,
+                gap,
+                liveShot.keeperOut,
+                liveShot.shotDistance,
+              );
+
+              if (liveShot.shotDistance !== undefined) {
+                MatchStatisticsService.recordGoalByDistance(
+                  match,
+                  scoringTeamId,
+                  liveShot.shotDistance,
+                );
+              }
           }
 
           scoringTeamState.score++;
@@ -1889,6 +1915,8 @@ export class MatchActionService {
             scoringTeamId,
             liveShot?.shooterId,
           );
+
+          
 
           if (liveShot?.assistPlayerId) {
             MatchStatisticsService.recordAssist(match, liveShot.assistPlayerId);

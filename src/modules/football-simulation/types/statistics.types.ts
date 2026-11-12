@@ -179,6 +179,45 @@ export function createKeeperShotBreakdown(): KeeperShotBreakdown {
   };
 }
 
+// --- Shots by distance from goal ---------------------------------------
+export const SHOT_DISTANCE_BANDS = [
+  "0-6 m",
+  "6-12 m",
+  "12-18 m",
+  "18-25 m",
+  "25+ m",
+] as const;
+
+export type ShotDistanceBand = (typeof SHOT_DISTANCE_BANDS)[number];
+
+export interface ShotBandStats {
+  shots: number;
+  onTarget: number;
+  goals: number;
+}
+
+export type ShotDistanceBreakdown = Record<ShotDistanceBand, ShotBandStats>;
+
+export function createShotDistanceBreakdown(): ShotDistanceBreakdown {
+  const row = (): ShotBandStats => ({ shots: 0, onTarget: 0, goals: 0 });
+
+  return {
+    "0-6 m": row(),
+    "6-12 m": row(),
+    "12-18 m": row(),
+    "18-25 m": row(),
+    "25+ m": row(),
+  };
+}
+
+export function getShotDistanceBand(distance: number): ShotDistanceBand {
+  if (distance < 6) return "0-6 m";
+  if (distance < 12) return "6-12 m";
+  if (distance < 18) return "12-18 m";
+  if (distance < 25) return "18-25 m";
+  return "25+ m";
+}
+
 export interface TeamMatchStatistics {
   possessionSeconds: number;
 
@@ -191,7 +230,12 @@ export interface TeamMatchStatistics {
   keeperShots: KeeperShotBreakdown;
   // Sum of the keeper's distance (m) from the crossing point when each goal
   // went in, per outcome.
+  shotsByDistance: ShotDistanceBreakdown;
   keeperGapSum: KeeperShotBreakdown;
+  // Sums per outcome, measured when the shot was taken: how far the keeper
+  // was from his goal line, and how far the shooter was from goal.
+  keeperOutSum: KeeperShotBreakdown;
+  shotDistanceSum: KeeperShotBreakdown;
   saveRolls: number;
   saveRollChanceSum: number;
 
@@ -248,7 +292,10 @@ export function createTeamStatistics(): TeamMatchStatistics {
     passCalibration: createPassCalibration(),
 
     keeperShots: createKeeperShotBreakdown(),
+    shotsByDistance: createShotDistanceBreakdown(),
     keeperGapSum: createKeeperShotBreakdown(),
+    keeperOutSum: createKeeperShotBreakdown(),
+    shotDistanceSum: createKeeperShotBreakdown(),
     saveRolls: 0,
     saveRollChanceSum: 0,
 

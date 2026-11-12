@@ -8,6 +8,7 @@ import {
   PASS_KINDS,
   KEEPER_SHOT_OUTCOMES,
   PREDICTION_BUCKETS,
+  SHOT_DISTANCE_BANDS,
 } from "../modules/football-simulation/types/statistics.types.js";
 import type {
   CarrierDuelStats,
@@ -16,11 +17,6 @@ import type {
   PassFailureReason,
   PassKind,
 } from "../modules/football-simulation/types/statistics.types.js";
-import type {
-  Team,
-  TeamMentality,
-  TeamStyle,
-} from "../modules/football-simulation/types/team.types.js";
 import { BAYVIEW, MANFIELD } from "../db/teams/index.js";
 
 const MATCHES = Number(process.argv[2] ?? 3);
@@ -173,11 +169,38 @@ function collectSides(match: Match): void {
   }
 }
 
+// Shots, shots on target and goals by distance from goal.
+const shotBands = Object.fromEntries(
+  SHOT_DISTANCE_BANDS.map((band) => [
+    band,
+    { shots: 0, onTarget: 0, goals: 0 },
+  ]),
+) as Record<
+  (typeof SHOT_DISTANCE_BANDS)[number],
+  { shots: number; onTarget: number; goals: number }
+>;
+
+function collectShotBands(match: Match): void {
+  for (const team of [match.statistics.home, match.statistics.away]) {
+    for (const band of SHOT_DISTANCE_BANDS) {
+      shotBands[band].shots += team.shotsByDistance[band].shots;
+      shotBands[band].onTarget += team.shotsByDistance[band].onTarget;
+      shotBands[band].goals += team.shotsByDistance[band].goals;
+    }
+  }
+}
+
 // What keepers did with shots that ended as a save or a goal.
 const keeperTotals = Object.fromEntries(
   KEEPER_SHOT_OUTCOMES.map((outcome) => [outcome, 0]),
 ) as Record<(typeof KEEPER_SHOT_OUTCOMES)[number], number>;
 const keeperGapTotals = Object.fromEntries(
+  KEEPER_SHOT_OUTCOMES.map((outcome) => [outcome, 0]),
+) as Record<(typeof KEEPER_SHOT_OUTCOMES)[number], number>;
+const keeperOutTotals = Object.fromEntries(
+  KEEPER_SHOT_OUTCOMES.map((outcome) => [outcome, 0]),
+) as Record<(typeof KEEPER_SHOT_OUTCOMES)[number], number>;
+const shotDistanceTotals = Object.fromEntries(
   KEEPER_SHOT_OUTCOMES.map((outcome) => [outcome, 0]),
 ) as Record<(typeof KEEPER_SHOT_OUTCOMES)[number], number>;
 let keeperRolls = 0;
@@ -188,6 +211,8 @@ function collectKeeper(match: Match): void {
     for (const outcome of KEEPER_SHOT_OUTCOMES) {
       keeperTotals[outcome] += team.keeperShots[outcome];
       keeperGapTotals[outcome] += team.keeperGapSum[outcome];
+      keeperOutTotals[outcome] += team.keeperOutSum[outcome];
+      shotDistanceTotals[outcome] += team.shotDistanceSum[outcome];
     }
     keeperRolls += team.saveRolls;
     keeperRollChanceSum += team.saveRollChanceSum;
@@ -246,59 +271,21 @@ function collectPassMix(match: Match): void {
 // Override a side's tactics from the environment, e.g.
 //   HOME_STYLE=TIKI_TAKA AWAY_STYLE=DIRECT npm run simulate-h -- 10 1
 // (also HOME_MENTALITY / AWAY_MENTALITY).
-const TEAM_STYLES: readonly TeamStyle[] = [
-  "POSSESSION",
-  "TIKI_TAKA",
-  "GEGENPRESS",
-  "COUNTER_ATTACKING",
-  "DIRECT",
-  "WING_PLAY",
-];
-const TEAM_MENTALITIES: readonly TeamMentality[] = [
-  "VERY_DEFENSIVE",
-  "DEFENSIVE",
-  "BALANCED",
-  "ATTACKING",
-  "VERY_ATTACKING",
-];
-
-function isTeamStyle(value: string): value is TeamStyle {
-  return TEAM_STYLES.some((style) => style === value);
-}
-
-function isTeamMentality(value: string): value is TeamMentality {
-  return TEAM_MENTALITIES.some((mentality) => mentality === value);
-}
-
-function withTactics(
-  team: Team,
+function withTactics<T extends typeof BAYVIEW>(
+  team: T,
   prefix: "HOME" | "AWAY",
-): Team {
+): T {
   const style = process.env[`${prefix}_STYLE`];
   const mentality = process.env[`${prefix}_MENTALITY`];
-  let selectedStyle: TeamStyle | undefined;
-  let selectedMentality: TeamMentality | undefined;
 
   if (!style && !mentality) return team;
-  if (style) {
-    if (!isTeamStyle(style)) {
-      throw new Error(`Invalid ${prefix}_STYLE: ${style}`);
-    }
-    selectedStyle = style;
-  }
-  if (mentality) {
-    if (!isTeamMentality(mentality)) {
-      throw new Error(`Invalid ${prefix}_MENTALITY: ${mentality}`);
-    }
-    selectedMentality = mentality;
-  }
 
   return {
     ...team,
     tactics: {
       ...team.tactics,
-      ...(selectedStyle && { style: selectedStyle }),
-      ...(selectedMentality && { mentality: selectedMentality }),
+      ...(style && { style: style as T["tactics"]["style"] }),
+      ...(mentality && { mentality: mentality as T["tactics"]["mentality"] }),
     },
   };
 }
@@ -386,6 +373,7 @@ for (let index = 0; index < MATCHES; index++) {
   collectPassMix(match);
   collectKeeper(match);
   collectSides(match);
+  collectShotBands(match);
 
   const { home, away } = match.statistics;
   const homeDuels = sumDuels(home.duelBreakdown);
@@ -575,9 +563,9 @@ console.table(
 
   console.log(
     "\nKEEPERS: what happened to shots that ended as a save or a goal\n" +
-      "(NO_ATTEMPT = never moved for it, DIVE_TOO_FAR = crossing point beyond\n" +
-      "dive range, DIVE_TOO_LATE = in range but the shot beat him,\n" +
-      "ROLL_FAILED = in reach but the roll failed,\n" +
+      "(NO_ATTEMPT = never moved for it, NO_REACH = sent diving but too far,\n" +
+      "DIVE_TOO_FAR = crossing point beyond dive range, DIVE_TOO_LATE = in range\n" +
+      "but the shot beat him, ROLL_FAILED = in reach but the roll failed,\n" +
       "NO_CONTACT = roll succeeded but he never reached the ball,\n" +
       "UNPREDICTED = not seen as on target; gap = his distance from where the\n" +
       "ball crossed, in metres)",
@@ -591,6 +579,14 @@ console.table(
         outcome === "SAVED" || keeperTotals[outcome] === 0
           ? "-"
           : (keeperGapTotals[outcome] / keeperTotals[outcome]).toFixed(1),
+      "keeper out at shot (m)":
+        keeperTotals[outcome] === 0
+          ? "-"
+          : (keeperOutTotals[outcome] / keeperTotals[outcome]).toFixed(1),
+      "shot distance (m)":
+        keeperTotals[outcome] === 0
+          ? "-"
+          : (shotDistanceTotals[outcome] / keeperTotals[outcome]).toFixed(1),
     })),
   );
   console.log(
@@ -635,6 +631,33 @@ console.table(
           : "-",
         "shots/match": (side.shots / matches).toFixed(1),
         "goals/match": (side.goals / matches).toFixed(1),
+      };
+    }),
+  );
+}
+
+{
+  const totalShots = SHOT_DISTANCE_BANDS.reduce(
+    (sum, band) => sum + shotBands[band].shots,
+    0,
+  );
+
+  console.log(
+    "\nSHOTS BY DISTANCE FROM GOAL (all shots, both teams)\n" +
+      "(rough real-football reference: most shots come from 6-18 m; goals per shot about\n" +
+      "35-40% inside 6 m, 10-15% at 6-12 m, 5-8% at 12-18 m, 2-4% beyond that)",
+  );
+  console.table(
+    SHOT_DISTANCE_BANDS.map((band) => {
+      const b = shotBands[band];
+
+      return {
+        distance: band,
+        shots: b.shots,
+        share: pct(b.shots, totalShots),
+        "on target %": pct(b.onTarget, b.shots),
+        goals: b.goals,
+        "goals / shot": pct(b.goals, b.shots),
       };
     }),
   );

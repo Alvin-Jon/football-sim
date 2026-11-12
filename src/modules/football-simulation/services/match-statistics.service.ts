@@ -1,5 +1,8 @@
 import type { MatchState } from "../types/match.types.js";
-import { getPredictionBucket } from "../types/statistics.types.js";
+import {
+  getPredictionBucket,
+  getShotDistanceBand,
+} from "../types/statistics.types.js";
 import type {
   DuelKind,
   DuelResultKind,
@@ -107,6 +110,8 @@ export class MatchStatisticsService {
     outcome: KeeperShotOutcome,
     rollChance?: number,
     gapAtGoal?: number,
+    keeperOut?: number,
+    shotDistance?: number,
   ): void {
     const team = this.getTeamStatistics(match, defendingTeamId);
 
@@ -116,10 +121,44 @@ export class MatchStatisticsService {
       team.keeperGapSum[outcome] += gapAtGoal;
     }
 
+    if (keeperOut !== undefined) {
+      team.keeperOutSum[outcome] += keeperOut;
+    }
+
+    if (shotDistance !== undefined) {
+      team.shotDistanceSum[outcome] += shotDistance;
+    }
+
     if (rollChance !== undefined) {
       team.saveRolls++;
       team.saveRollChanceSum += rollChance;
     }
+  }
+
+  // Shots and goals by how far the shooter was from goal.
+  static recordShotByDistance(
+    match: MatchState,
+    teamId: string,
+    distance: number,
+    onTarget: boolean,
+  ): void {
+    const band =
+      this.getTeamStatistics(match, teamId).shotsByDistance[
+        getShotDistanceBand(distance)
+      ];
+
+    band.shots++;
+    if (onTarget) band.onTarget++;
+  }
+
+  static recordGoalByDistance(
+    match: MatchState,
+    teamId: string,
+    distance: number,
+  ): void {
+    this.getTeamStatistics(match, teamId).shotsByDistance[
+      getShotDistanceBand(distance)
+    ].goals++;
   }
 
   static recordShot(
