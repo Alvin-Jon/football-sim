@@ -55,6 +55,7 @@ import { FormationPositioningService } from "./formation-positioning.service.js"
 import { TacticsService } from "./tactics.service.js";
 import { TackleDuelService } from "./tackle-duel.service.js";
 import type { DuelOutcome } from "./tackle-duel.service.js";
+import { chooseCarryTarget } from "../utils/carry-direction.util.js";
 
 
 interface PendingPass {
@@ -122,6 +123,7 @@ export class MatchActionService {
   private static readonly SHOT_ERROR_UNSKILLED = 0.2;
   private static readonly SHOT_ERROR_PRESSURE = 0.12;
   private static readonly SHOT_ERROR_LIMIT = 1.0;
+  private static readonly SHOT_MIN_HOLD_TICKS = 6; // 0.3 s
 
   private static readonly PASS_GRACE_TICKS = 6;
   private static readonly PASS_GRACE_RADIUS = 3;
@@ -129,6 +131,7 @@ export class MatchActionService {
   private static readonly ASSIST_WINDOW_TICKS = 200;
   private static readonly SHOT_WINDOW_TICKS = 200;
   private static readonly ALLOW_NON_SHOT_GOALS = false;
+  private readonly possessionOrigins = new Map<string, Vector2D>();
 
   private readonly random: () => number;
   private readonly decisionEngine = new DecisionEngineService();
@@ -311,6 +314,8 @@ export class MatchActionService {
       playerId,
       match.tick + MatchActionService.POSSESSION_SHIELD_TICKS,
     );
+    const holder = this.findPlayer(match, playerId);
+    if (holder) this.possessionOrigins.set(playerId, { ...holder.state.position });
   }
 
   // True if the carrier has not held the ball long enough to release it yet.
@@ -318,11 +323,17 @@ export class MatchActionService {
     match: MatchState,
     playerId: string,
     context: DecisionContext,
+    maxHoldTicks?: number,
   ): boolean {
     const started = this.possessionStarts.get(playerId);
     if (started === undefined) return false;
 
-    return match.tick - started < this.getHoldTicks(context);
+    const holdTicks = this.getHoldTicks(context);
+
+    return (
+      match.tick - started <
+      (maxHoldTicks === undefined ? holdTicks : Math.min(holdTicks, maxHoldTicks))
+    );
   }
 
   private getHoldTicks(context: DecisionContext): number {
@@ -355,13 +366,14 @@ export class MatchActionService {
     context: DecisionContext,
   ): void {
     this.cancelRunningAction(player.id, state);
-    state.targetPosition = PitchService.clampPosition(
-      this.positionService.getForwardPosition(
-        state.position,
-        3,
-        context.attackingDirection,
-      ),
+    state.targetPosition = chooseCarryTarget(
+      state.position,
+      this.positionService.getAttackSign(context.attackingDirection),
+      context.goalPosition,
+      context.opponents,
+      `${player.id}:${Math.floor(context.tick / 10)}`,
     );
+
     state.isMoving = true;
     state.currentAction = "DRIBBLING";
   }
@@ -933,6 +945,16 @@ export class MatchActionService {
         y: PITCH_DIMENSIONS.width / 2,
       },
       ...(formation && { formation }),
+      ...(match.ball.possessionPlayerId === player.id && {
+        carry: {
+          distance: this.possessionOrigins.has(player.id)
+            ? PitchService.getDistance(
+                this.possessionOrigins.get(player.id)!,
+                state.position,
+              )
+            : 0,
+        },
+      }),
     };
   }
 
@@ -1072,7 +1094,7 @@ export class MatchActionService {
         return;
 
       case "SHOOT":
-        if (this.mustKeepBall(match, player.id, context)) {
+        if (this.mustKeepBall(match, player.id, context,MatchActionService.SHOT_MIN_HOLD_TICKS)) {
           this.carryAndReassess(player, state, context);
           return;
         }

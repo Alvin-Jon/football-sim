@@ -5,11 +5,31 @@ import type {
 
 import { DecisionPositionService } from "./decision-position.service.js";
 import { PitchService } from "./pitch.service.js";
+import { PositionInfluenceService } from "./position-influence.service.js";
+import type { PlayerRole } from "./position-influence.service.js";
+import { PITCH_DIMENSIONS } from "../constants/pitch.constants.js";
+import { hash01 } from "../utils/carry-direction.util.js";
 
 type Point = { x: number; y: number };
 
 export class DribbleEvaluationService {
   private readonly positionService = new DecisionPositionService();
+
+  // How far a player may carry the ball (metres, from where he got it)
+  // before carrying starts to look worse than releasing it. Without this a
+  // free defensive midfielder ran the whole length of the pitch.
+  private static readonly CARRY_ALLOWANCE: Record<PlayerRole, number> = {
+    CENTRE_BACK: 10,
+    FULL_BACK: 22,
+    DEFENSIVE_MID: 12,
+    CENTRAL_MID: 22,
+    ATTACKING_MID: 28,
+    WINGER: 35,
+    STRIKER: 28,
+  };
+
+  private static readonly CARRY_PENALTY_PER_METRE = 2.5;
+  private static readonly MAX_CARRY_PENALTY = 60;
 
   evaluate(context: DecisionContext, candidate: DecisionCandidate): number {
     if (candidate.action !== "DRIBBLE") return 0;
@@ -22,7 +42,10 @@ export class DribbleEvaluationService {
       this.evaluatePath(from, target, context) +
       this.evaluateSpace(target, context) +
       this.evaluatePressure(from, context) +
-      this.evaluateProgress(from, target, context)
+      this.evaluateProgress(from, target, context) +
+      this.evaluateDirection(from, target, context) +
+      this.evaluateCarry(context) +
+      this.jitter(context, target)
     );
   }
 
@@ -95,6 +118,76 @@ export class DribbleEvaluationService {
     else if (distanceToGoal < 28) score -= 15;
 
     return score;
+  }
+
+  // Which way he is heading, not just how far forward. A lean towards goal is
+  // worth a little, running along the touchline is not, and a wide player
+  // with LIKES_TO_CUT_INSIDE is rewarded for carrying infield.
+  private evaluateDirection(
+    from: Point,
+    target: Point,
+    context: DecisionContext,
+  ): number {
+    const dx = target.x - from.x;
+    const dy = target.y - from.y;
+    const length = Math.hypot(dx, dy);
+
+    if (length < 0.01) return 0;
+
+    const goal = context.goalPosition;
+    const toGoalX = goal.x - from.x;
+    const toGoalY = goal.y - from.y;
+    const goalLength = Math.hypot(toGoalX, toGoalY) || 1;
+
+    let score = 6 * ((dx * toGoalX + dy * toGoalY) / (length * goalLength));
+
+    const margin = Math.min(target.y, PITCH_DIMENSIONS.width - target.y);
+    if (margin < 3) score -= 10;
+    else if (margin < 6) score -= 4;
+
+    if (context.player.player.traits.includes("LIKES_TO_CUT_INSIDE")) {
+      const centreY = PITCH_DIMENSIONS.width / 2;
+
+      if (Math.abs(from.y - centreY) > 18) {
+        // +1 = straight towards the middle, -1 = straight out to the touchline.
+        const inward =
+          (Math.abs(from.y - centreY) - Math.abs(target.y - centreY)) / length;
+
+        score += inward > 0 ? 12 * inward : 6 * inward;
+      }
+    }
+
+    return score;
+  }
+
+  // The longer he has already carried it, the less this looks like a good
+  // idea, by role (see CARRY_ALLOWANCE).
+  private evaluateCarry(context: DecisionContext): number {
+    const carried = context.carry?.distance ?? 0;
+    const role = PositionInfluenceService.getRole(
+      context.player.player.position,
+    );
+
+    let allowance = DribbleEvaluationService.CARRY_ALLOWANCE[role];
+    if (context.player.player.traits.includes("RUNS_WITH_BALL")) {
+      allowance += 10;
+    }
+
+    const excess = Math.max(0, carried - allowance);
+
+    return -Math.min(
+      DribbleEvaluationService.MAX_CARRY_PENALTY,
+      excess * DribbleEvaluationService.CARRY_PENALTY_PER_METRE,
+    );
+  }
+
+  // Equal options used to resolve to the first one every time, which is the
+  // dead-straight carry. A small repeatable variation per player and moment
+  // lets a run drift and bend.
+  private jitter(context: DecisionContext, target: Point): number {
+    const key = `${context.player.player.id}:${Math.floor(context.tick / 15)}:${Math.round(target.x)}:${Math.round(target.y)}`;
+
+    return (hash01(key) - 0.5) * 4;
   }
 
   private nearestOpponentDistance(

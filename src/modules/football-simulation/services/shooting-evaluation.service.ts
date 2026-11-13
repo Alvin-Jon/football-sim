@@ -8,8 +8,13 @@ import { PitchService } from "./pitch.service.js";
 type Point = { x: number; y: number };
 
 export class ShootingEvaluationService {
-  private static readonly MIN_SHOT_QUALITY = 14;
+  // Lowered from 14 and the distance bands widened: with the old numbers no
+  // shot could pass the threshold from beyond about 11 m, so players kept
+  // carrying the ball into the six-yard box (goals were being scored from
+  // 0.8 m, and nothing was ever shot from outside 12 m).
+  private static readonly MIN_SHOT_QUALITY = 10;
   private static readonly REJECTED_SHOT_SCORE = -60;
+  private static readonly LONG_SHOOTER_BONUS = 8;
 
   evaluate(context: DecisionContext, candidate: DecisionCandidate): number {
     if (candidate.action !== "SHOOT") return 0;
@@ -17,8 +22,13 @@ export class ShootingEvaluationService {
     const from = context.player.state.position;
     const goal = context.goalPosition;
 
+    const distance = PitchService.getDistance(from, goal);
+    const longShooter = context.player.player.traits.includes(
+      "SHOOTS_FROM_DISTANCE",
+    );
+
     const quality =
-      this.evaluateDistance(from, goal) +
+      this.evaluateDistance(distance, longShooter) +
       this.evaluateAngle(from, goal) +
       this.evaluatePressure(from, context) +
       this.evaluateLane(from, goal, context);
@@ -30,17 +40,23 @@ export class ShootingEvaluationService {
     return quality;
   }
 
-  private evaluateDistance(from: Point, goal: Point): number {
-    const distance = PitchService.getDistance(from, goal);
+  private evaluateDistance(distance: number, longShooter: boolean): number {
+    let score: number;
 
-    if (distance <= 5) return 40;
-    if (distance <= 8) return 32;
-    if (distance <= 11) return 20;
-    if (distance <= 14) return 8;
-    if (distance <= 18) return -6;
-    if (distance <= 24) return -22;
+    if (distance <= 5) score = 40;
+    else if (distance <= 8) score = 32;
+    else if (distance <= 11) score = 22;
+    else if (distance <= 14) score = 16;
+    else if (distance <= 18) score = 10;
+    else if (distance <= 24) score = 2;
+    else score = -35;
 
-    return -45;
+    // A player who likes a shot from range sees more of the pitch as shootable.
+    if (longShooter && distance > 12 && distance <= 28) {
+      score += ShootingEvaluationService.LONG_SHOOTER_BONUS;
+    }
+
+    return score;
   }
 
   // Wide of the goal means a small target. 0 = straight in front,

@@ -22,7 +22,7 @@ import { PITCH_DIMENSIONS } from "../constants/pitch.constants.js";
 
 
 export class DecisionEngineService {
-  private static readonly TEMPO_SCALE = 1;
+  private static readonly TEMPO_SCALE = 0.6;
   private static readonly SUPPORT_COUNT = 3;
 
   private static readonly SHAPE_BONUS = 30;
@@ -65,21 +65,21 @@ export class DecisionEngineService {
       context.attackingDirection,
     );
 
-    const dribbleOptions = [
-      { forward: 10, lateral: 0, reasoning: "Run at goal with the ball" },
-      { forward: 8, lateral: -7, reasoning: "Carry the ball into space on one side" },
-      { forward: 8, lateral: 7, reasoning: "Carry the ball into space on the other side" },
-    ];
+    for (const degrees of [-60, -40, -20, 0, 20, 40, 60]) {
+      const radians = (degrees * Math.PI) / 180;
 
-    for (const option of dribbleOptions) {
       candidates.push({
         action: "DRIBBLE",
         score: 0,
         targetPosition: PitchService.clampPosition({
-          x: playerPosition.x + attackSign * option.forward,
-          y: playerPosition.y + option.lateral,
+          x: playerPosition.x + attackSign * 9 * Math.cos(radians),
+          y: playerPosition.y + 9 * Math.sin(radians),
         }),
-        reasoning: [option.reasoning],
+        reasoning: [
+          degrees === 0
+            ? "Run at goal with the ball"
+            : `Carry the ball ${degrees} degrees off the straight line`,
+        ],
       });
     }
 

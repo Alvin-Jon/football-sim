@@ -63,6 +63,8 @@ export interface DecisionContext {
   goalPosition: Vector2D;
   tactics: TacticalModifiers;
 
+  carry?: { distance: number }; // metres carried since he got the ball
+
   formation?: {
   shapePosition: Vector2D;
   roamRadius: number;
