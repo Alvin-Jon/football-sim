@@ -203,6 +203,21 @@ export class MatchStatisticsService {
     }
   }
 
+  static recordChanceCreated(
+    match: MatchState,
+    teamId: string,
+    playerId: string,
+  ): void {
+    const team = this.getTeamStatistics(match, teamId);
+    const player = match.statistics.players[playerId];
+
+    team.chancesCreated++;
+
+    if (player) {
+      player.chancesCreated++;
+    }
+  }
+
   static recordTackle(
     match: MatchState,
     teamId: string,

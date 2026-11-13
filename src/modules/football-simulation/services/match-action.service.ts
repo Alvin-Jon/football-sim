@@ -1333,8 +1333,7 @@ export class MatchActionService {
       );
 
       const lastPass = this.lastCompletedPasses.get(match.id);
-
-      const assistPlayerId =
+      const chanceCreatorId =
         lastPass !== undefined &&
         lastPass.teamId === team.id &&
         lastPass.receiverId === player.id &&
@@ -1342,6 +1341,15 @@ export class MatchActionService {
         match.tick - lastPass.tick <= MatchActionService.ASSIST_WINDOW_TICKS
           ? lastPass.passerId
           : null;
+      const assistPlayerId = chanceCreatorId;
+
+      if (predictedShot?.isOnTarget && chanceCreatorId) {
+        MatchStatisticsService.recordChanceCreated(
+          match,
+          team.id,
+          chanceCreatorId,
+        );
+      }
 
       this.pendingShots.set(match.id, {
         shooterId: player.id,

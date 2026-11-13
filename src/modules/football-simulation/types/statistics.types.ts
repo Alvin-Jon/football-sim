@@ -241,6 +241,7 @@ export interface TeamMatchStatistics {
 
   shots: number;
   shotsOnTarget: number;
+  chancesCreated: number;
 
   goals: number;
 
@@ -261,6 +262,7 @@ export interface PlayerMatchStatistics {
 
   shots: number;
   shotsOnTarget: number;
+  chancesCreated: number;
   goals: number;
   assists: number;
 
@@ -301,6 +303,7 @@ export function createTeamStatistics(): TeamMatchStatistics {
 
     shots: 0,
     shotsOnTarget: 0,
+    chancesCreated: 0,
 
     goals: 0,
 
@@ -323,6 +326,7 @@ export function createPlayerStatistics(): PlayerMatchStatistics {
 
     shots: 0,
     shotsOnTarget: 0,
+    chancesCreated: 0,
     goals: 0,
     assists: 0,
 

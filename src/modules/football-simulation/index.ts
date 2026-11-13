@@ -16,6 +16,7 @@ export * from "./services/match-clock.service.js";
 export * from "./services/match-initialization.service.js";
 export * from "./services/match-engine.service.js";
 export * from "./services/match-action.service.js";
+export * from "./services/match-rating.service.js";
 
 export * from "./types/player-traits.types.js";
 export * from "./types/decision.types.js";
