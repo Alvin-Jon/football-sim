@@ -82,12 +82,12 @@ export class PassingEvaluationService {
   // RECEIVES the pass spreads the ball around: positive = more passes to him.
   private static readonly RECEIVER_ROLE_PREFERENCE: Record<PlayerRole, number> = {
     CENTRE_BACK: 3,
-    FULL_BACK: 1,
-    DEFENSIVE_MID: -1,
-    CENTRAL_MID: -2,
-    ATTACKING_MID: -3,
-    WINGER: -6,
-    STRIKER: -10,
+    FULL_BACK: 2,
+    DEFENSIVE_MID: 0,
+    CENTRAL_MID: -5,
+    ATTACKING_MID: -6,
+    WINGER: -9,
+    STRIKER: -15,
   };
 
   // How willing each role is to pass (negative = holds or carries instead).
@@ -100,9 +100,9 @@ export class PassingEvaluationService {
     FULL_BACK: 0,
     DEFENSIVE_MID: -8,
     CENTRAL_MID: -8,
-    ATTACKING_MID: -8,
-    WINGER: -12,
-    STRIKER: -4,
+    ATTACKING_MID: -4,
+    WINGER: 0,
+    STRIKER: 0,
   };
 
   private readonly positionService = new DecisionPositionService();

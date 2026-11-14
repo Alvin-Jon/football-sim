@@ -79,7 +79,7 @@ async function simulateMatch() {
 
   try {
     const homeTeam = MANFIELD;
-    const awayTeam = BAYVIEW;
+    const awayTeam = VALENCIA;
 
     let match = MatchInitializationService.initialize(
       "test-match-001",

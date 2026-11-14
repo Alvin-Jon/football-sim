@@ -82,6 +82,7 @@ const TRAIT_INFLUENCES: Partial<
     PRESS: 5,
     MARK: 5,
     INTERCEPT: 3,
+    BLOCK_SHOT: 3,
   },
 
   STAYS_BACK_AT_ALL_TIMES: {

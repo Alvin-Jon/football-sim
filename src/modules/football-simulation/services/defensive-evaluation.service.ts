@@ -4,9 +4,14 @@ import type {
   DecisionContext,
 } from "../types/decision.types.js";
 
+import { PITCH_DIMENSIONS } from "../constants/pitch.constants.js";
 import { PitchService } from "./pitch.service.js";
 
 export class DefensiveEvaluationService {
+  private static readonly BLOCK_BASE = 60;
+  private static readonly COVER_BASE = 38;
+  private static readonly COVER_DANGER_ZONE = 0.22;
+
   evaluate(
     context: DecisionContext,
     candidate: DecisionCandidate,
@@ -30,15 +35,89 @@ export class DefensiveEvaluationService {
       case "TRACK_BACK":
         return this.evaluateTrackBack(context, candidate);
 
+      case "BLOCK_SHOT":
+        return this.evaluateBlockShot(context, candidate);
+
+      case "COVER_GOAL":
+        return this.evaluateCoverGoal(context, candidate);
+
       default:
         return 0;
     }
   }
 
-  // --------------------------------------------------
-  // PRESSING
-  // --------------------------------------------------
+  private evaluateBlockShot(
+    context: DecisionContext,
+    candidate: DecisionCandidate,
+  ): number {
+    const opportunity = context.blockOpportunity;
 
+    if (!opportunity) return -100;
+
+    const attributes = context.player.player.attributes;
+
+    let score = DefensiveEvaluationService.BLOCK_BASE;
+
+    score += opportunity.chance * 40;
+
+    score += Math.min(1, opportunity.margin / 0.3) * 10;
+
+    score += attributes.anticipation * 0.3;
+    score += attributes.positioning * 0.2;
+    score += attributes.agility * 0.1;
+
+    const gap = PitchService.getDistance(
+      context.player.state.position,
+      candidate.targetPosition ?? opportunity.point,
+    );
+
+    if (gap > 4) score -= 10;
+
+    return score;
+  }
+
+  private evaluateCoverGoal(
+    context: DecisionContext,
+    candidate: DecisionCandidate,
+  ): number {
+    const carrier = this.getBallCarrier(context);
+
+    if (!carrier || !candidate.targetPosition) return -100;
+
+    const length = PITCH_DIMENSIONS.length;
+
+    const ownGoal = {
+      x: length - context.goalPosition.x,
+      y: PITCH_DIMENSIONS.width / 2,
+    };
+
+    const carrierToGoal = PitchService.getDistance(
+      carrier.state.position,
+      ownGoal,
+    );
+    const zone = DefensiveEvaluationService.COVER_DANGER_ZONE * length;
+
+    let score = DefensiveEvaluationService.COVER_BASE;
+
+    score += Math.max(0, Math.min(1, (zone - carrierToGoal) / zone)) * 25;
+
+    const attributes = context.player.player.attributes;
+
+    score += attributes.positioning * 0.4;
+    score += attributes.teamwork * 0.2;
+    score += attributes.anticipation * 0.2;
+
+    const gap = PitchService.getDistance(
+      context.player.state.position,
+      candidate.targetPosition,
+    );
+
+    score -= Math.min(25, Math.max(0, gap - 6) * 1.2);
+
+    return score;
+  }
+
+ 
   private evaluatePress(
     context: DecisionContext,
     candidate: DecisionCandidate,
@@ -192,7 +271,6 @@ export class DefensiveEvaluationService {
     if (!carrier) {
       return -100;
     }
-    //if (match.ball.possessionPlayerId !== carrier.player.id) return;
 
     const distance = PitchService.getDistance(
       context.player.state.position,
@@ -207,7 +285,7 @@ export class DefensiveEvaluationService {
 
     const attributes = context.player.player.attributes;
 
-    let score = 0; // we should keep adjusting this 
+    let score = 0; // we should keep adjusting this
 
     score += attributes.tackling * 0.5;
     score += attributes.anticipation * 0.3;

@@ -512,7 +512,7 @@ const D_Wright: Player = {
   name: "D. Wright",
   position: "CM",
   personality: "AGGRESSIVE",
-  traits: ["COMES_DEEP_TO_GET_BALL", "RUNS_WITH_BALL", "SHOOTS_FROM_DISTANCE", "TRIES_RISKY_PASSES", "RUNS_WITH_BALL"],
+  traits: ["COMES_DEEP_TO_GET_BALL", "RUNS_WITH_BALL", "SHOOTS_FROM_DISTANCE", "TRIES_RISKY_PASSES", "STOPPER"],
   attributes: {
     pace: 15,
     acceleration: 13,

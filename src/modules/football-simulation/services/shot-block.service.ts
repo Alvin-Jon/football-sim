@@ -22,28 +22,17 @@ export interface Deflection {
   verticalSpeed: number;
 }
 
+//later we would use jumping to increase height and maybe reflexes for high chance 
+
 export class ShotBlockService {
-  // How close the ball's path must pass to a defender for a block attempt.
-  static readonly BLOCK_RADIUS = 1.0;
-
-  // Balls above this height go over a defender.
+  static readonly BLOCK_RADIUS = 1.3;
   static readonly MAX_BLOCK_HEIGHT = 1.8;
-
-  // Slower balls are passes or rebounds, not shots.
   static readonly MIN_SHOT_SPEED = 8;
-
-  // At most this many defenders commit to blocking one shot.
   static readonly MAX_BLOCKERS = 2;
-
-  // Seconds a defender needs to see the shot and set off.
-  static readonly REACTION_TIME = 0.25;
-
-  // How far ahead (seconds) the ball's path is checked, and the step used.
+  static readonly REACTION_TIME = 0.15;
   static readonly LOOKAHEAD = 1.5;
   static readonly STEP = 0.05;
 
-  // One block roll per defender per shot. Rolling every tick while the ball
-  // passes would give a defender several attempts at the same shot.
   private readonly rolls = new Map<
     string,
     { key: string; players: Set<string> }
@@ -54,8 +43,6 @@ export class ShotBlockService {
     private readonly random: () => number = Math.random,
   ) {}
 
-  // Called once per tick while a shot is in flight. Returns the (at most two)
-  // defenders who can reach the shot's path in time, keyed by player id.
   assess(
     ball: BallState,
     shot: ShotReference,
@@ -177,16 +164,30 @@ export class ShotBlockService {
 
   // Where a blocked shot goes: back and to the side, much slower, and low.
   computeDeflection(ball: BallState): Deflection {
-    const incoming = Math.atan2(ball.velocity.y, ball.velocity.x);
-    const speed = Math.hypot(ball.velocity.x, ball.velocity.y);
+  const incoming = Math.atan2(ball.velocity.y, ball.velocity.x);
+  const speed = Math.hypot(ball.velocity.x, ball.velocity.y);
 
-    return {
-      // Roughly back towards the shooter, spread up to about 63 degrees.
-      direction: incoming + Math.PI + (this.random() - 0.5) * 2.2,
-      speed: speed * (0.2 + this.random() * 0.3),
-      verticalSpeed: 1 + this.random() * 3,
-    };
-  }
+  const deflectionType = this.random();
+
+  // Determine how much momentum is retained.
+  const speedMultiplier =
+    deflectionType < 0.4
+      ? 0.2 + this.random() * 0.2 // Heavy block
+      : deflectionType < 0.8
+        ? 0.4 + this.random() * 0.3 // Normal deflection
+        : 0.7 + this.random() * 0.3; // Glancing deflection
+
+  return {
+    direction:
+      incoming +
+      Math.PI +
+      (this.random() - 0.5) * 2.2,
+
+    speed: speed * speedMultiplier,
+
+    verticalSpeed: this.random() * 4,
+  };
+}
 
   // Chance that a defender blocks a shot he is in the path of. A defender who
   // has set himself for the block (committed) is better placed.
@@ -195,12 +196,12 @@ export class ShotBlockService {
     const norm = (value: number): number => (value - 1) / 19;
 
     const raw =
-      0.15 +
+      0.2 +
       0.2 * norm(a.anticipation) +
       0.15 * norm(a.positioning) +
       0.1 * norm(a.agility) +
       (committed ? 0.15 : 0) -
-      0.012 * Math.max(0, shotSpeed - 12);
+      0.008 * Math.max(0, shotSpeed - 12);
 
     return Math.max(0.05, Math.min(0.75, raw));
   }

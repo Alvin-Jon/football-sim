@@ -935,6 +935,9 @@ private resolveShotBlocks(match: MatchState, previousPosition: Vector2D, previou
         opponentState,
         direction,
       );
+      if (context.blockOpportunity) {
+        this.decisionEngine.invalidateDecision(player.id);
+      }
       const decision = this.decisionEngine.decide(context);
       planned.push({ team, teamState, player, state, context, decision });
     }
