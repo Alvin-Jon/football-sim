@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { MatchInitializationService } from "../modules/football-simulation/services/match-initialization.service.js";
 import { MatchEngineService } from "../modules/football-simulation/services/match-engine.service.js";
 import { MatchTUI } from "../tui/match-tui.js";
-import { BAYVIEW, MANFIELD } from "../db/teams/index.js";
+import { BAYVIEW, MANFIELD, VALENCIA } from "../db/teams/index.js";
 
 type Match = ReturnType<typeof MatchInitializationService.initialize>;
 
@@ -78,8 +78,8 @@ async function simulateMatch() {
   const tui = new MatchTUI();
 
   try {
-    const homeTeam = BAYVIEW;
-    const awayTeam = MANFIELD;
+    const homeTeam = MANFIELD;
+    const awayTeam = VALENCIA;
 
     let match = MatchInitializationService.initialize(
       "test-match-001",

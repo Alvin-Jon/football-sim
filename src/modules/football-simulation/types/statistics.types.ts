@@ -266,6 +266,12 @@ export interface PlayerMatchStatistics {
   goals: number;
   assists: number;
 
+  carries: number;
+  carryDistance: number;
+  longCarries: number;
+  veryLongCarries: number;
+  longestCarry: number;
+
   tacklesAttempted: number;
   tacklesWon: number;
   tacklesLoose: number;
@@ -305,6 +311,8 @@ export function createTeamStatistics(): TeamMatchStatistics {
     shotsOnTarget: 0,
     chancesCreated: 0,
 
+    
+
     goals: 0,
 
     tacklesAttempted: 0,
@@ -329,6 +337,12 @@ export function createPlayerStatistics(): PlayerMatchStatistics {
     chancesCreated: 0,
     goals: 0,
     assists: 0,
+
+    carries: 0,
+    carryDistance: 0,
+    longCarries: 0,
+    veryLongCarries: 0,
+    longestCarry: 0,
 
     tacklesAttempted: 0,
     tacklesWon: 0,

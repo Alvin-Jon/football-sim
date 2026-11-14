@@ -115,7 +115,7 @@ export class MatchActionService {
   private static readonly CONTEST_INTERVAL_TICKS = 8;
   private static readonly OPPONENT_CONTEST_SCALE = 0.45;
   private static readonly POSSESSION_SHIELD_TICKS = 20;
-  private static readonly MIN_HOLD_TICKS = 60;
+  private static readonly MIN_HOLD_TICKS = 80;
   private static readonly PRESSURE_HOLD_TICKS = 10;
   private static readonly MIN_HOLD_FLOOR_TICKS = 6;
   private static readonly SHOT_ERROR_BASE = 0.3;
@@ -457,6 +457,18 @@ export class MatchActionService {
     const holder = match.ball.possessionPlayerId;
 
     if (holder !== this.lastHolderId) {
+       if (this.lastHolderId !== null) {
+              const previous = this.findPlayer(match, this.lastHolderId);
+              const origin = this.possessionOrigins.get(this.lastHolderId);
+
+              if (previous && origin) {
+                MatchStatisticsService.recordCarry(
+                  match,
+                  this.lastHolderId,
+                  PitchService.getDistance(origin, previous.state.position),
+                );
+              }
+            };
       if (holder !== null) {
         const lastPass = this.lastCompletedPasses.get(match.id);
         const holderTeamId = this.getPlayerTeamId(match, holder);

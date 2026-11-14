@@ -333,6 +333,22 @@ export class MatchStatisticsService {
     };
   }
 
+  static recordCarry(
+    match: MatchState,
+    playerId: string,
+    distance: number,
+  ): void {
+    const player = match.statistics.players[playerId];
+
+    if (!player) return;
+
+    player.carries++;
+    player.carryDistance += distance;
+    if (distance >= 15) player.longCarries++;
+    if (distance >= 25) player.veryLongCarries++;
+    if (distance > player.longestCarry) player.longestCarry = distance;
+  }
+
   static getPassingAccuracy(match: MatchState) {
     const calculate = (
       attempted: number,

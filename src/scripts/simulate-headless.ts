@@ -53,6 +53,11 @@ interface Totals {
   interceptions: number;
   kinds: Record<PassKind, { attempted: number; completed: number }>;
   duels: Record<DuelKind, CarrierDuelStats>;
+  carries: number;
+  carryDistance: number;
+  longCarries: number;
+  veryLongCarries: number;
+  longestCarry: number;
 }
 
 const emptyKinds = () => ({
@@ -80,6 +85,11 @@ const empty = (): Totals => ({
   interceptions: 0,
   kinds: emptyKinds(),
   duels: emptyDuels(),
+  carries: 0,
+  carryDistance: 0,
+  longCarries: 0,
+  veryLongCarries: 0,
+  longestCarry: 0,
 });
 
 const pct = (part: number, whole: number): string =>
@@ -327,8 +337,13 @@ function add(totals: Totals, stats: Match["statistics"]["players"][string]): voi
   totals.tacklesAttempted += stats.tacklesAttempted;
   totals.tacklesWon += stats.tacklesWon;
   totals.tacklesLoose += stats.tacklesLoose;
-  totals.tacklesBeaten += stats.tacklesBeaten;
+  totals.tacklesBeaten += stats.tacklesBeaten;  
   totals.interceptions += stats.interceptions;
+  totals.carries += stats.carries;
+  totals.carryDistance += stats.carryDistance;
+  totals.longCarries += stats.longCarries;
+  totals.veryLongCarries += stats.veryLongCarries;
+  totals.longestCarry = Math.max(totals.longestCarry, stats.longestCarry);
 
   for (const kind of PASS_KINDS) {
     const typed = MatchStatisticsService.getPassTypeStats(stats, kind);
@@ -662,3 +677,22 @@ console.table(
     }),
   );
 }
+
+console.log(
+  "\nCARRIES BY ROLE: how far a player takes the ball between getting it and giving it up\n" +
+    "(straight-line metres, once per possession; includes the wait before releasing a pass)",
+);
+console.table(
+  [
+    ...[...byRole.entries()].map(([role, t]) => [role, t] as const),
+    ["ALL", overall] as const,
+  ].map(([role, t]) => ({
+    role,
+    "carries/player/match": (t.carries / Math.max(1, t.players)).toFixed(0),
+    "avg carry (m)": t.carries === 0 ? "-" : (t.carryDistance / t.carries).toFixed(1),
+    "% 15 m or more": pct(t.longCarries, t.carries),
+    "% 25 m or more": pct(t.veryLongCarries, t.carries),
+    "longest (m)": t.longestCarry.toFixed(0),
+    "carried/player/match (m)": (t.carryDistance / Math.max(1, t.players)).toFixed(0),
+  })),
+);

@@ -8,13 +8,18 @@ import { PitchService } from "./pitch.service.js";
 type Point = { x: number; y: number };
 
 export class ShootingEvaluationService {
-  // Lowered from 14 and the distance bands widened: with the old numbers no
-  // shot could pass the threshold from beyond about 11 m, so players kept
-  // carrying the ball into the six-yard box (goals were being scored from
-  // 0.8 m, and nothing was ever shot from outside 12 m).
-  private static readonly MIN_SHOT_QUALITY = 10;
+  // History: 14 with narrow bands meant nothing was shot from beyond about
+  // 11 m (players carried the ball into the six-yard box). 10 with wide bands
+  // fixed that but overshot: about 35 shots per team per match, half of them
+  // from 12-18 m. 13 with the bands below should land in between: clear
+  // chances out to about 14 m, and only players with SHOOTS_FROM_DISTANCE
+  // shoot from 14-18 m. That still left about 27 shots per team per match
+  // (real football about 12), 45% of them from 12-18 m, so it is now 16:
+  // players without the trait shoot from inside about 11 m, those with it
+  // from up to about 14 m, and from 14-18 m only when everything is clear.
+  private static readonly MIN_SHOT_QUALITY = 13;
   private static readonly REJECTED_SHOT_SCORE = -60;
-  private static readonly LONG_SHOOTER_BONUS = 8;
+  private static readonly LONG_SHOOTER_BONUS = 10;
 
   evaluate(context: DecisionContext, candidate: DecisionCandidate): number {
     if (candidate.action !== "SHOOT") return 0;
@@ -46,9 +51,9 @@ export class ShootingEvaluationService {
     if (distance <= 5) score = 40;
     else if (distance <= 8) score = 32;
     else if (distance <= 11) score = 22;
-    else if (distance <= 14) score = 16;
-    else if (distance <= 18) score = 10;
-    else if (distance <= 24) score = 2;
+    else if (distance <= 14) score = 15;
+    else if (distance <= 18) score = 6;
+    else if (distance <= 24) score = -5;
     else score = -35;
 
     // A player who likes a shot from range sees more of the pitch as shootable.

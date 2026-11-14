@@ -83,11 +83,26 @@ export class PassingEvaluationService {
   private static readonly RECEIVER_ROLE_PREFERENCE: Record<PlayerRole, number> = {
     CENTRE_BACK: 3,
     FULL_BACK: 1,
-    DEFENSIVE_MID: 2,
-    CENTRAL_MID: 0,
+    DEFENSIVE_MID: -1,
+    CENTRAL_MID: -2,
     ATTACKING_MID: -3,
     WINGER: -6,
     STRIKER: -10,
+  };
+
+  // How willing each role is to pass (negative = holds or carries instead).
+  // Pass volume rose to about 650-720 per team per match, almost all of it in
+  // the midfield hubs (defensive mids about 98 and central mids about 101 a
+  // match, against roughly 55-60 in real football, while defenders were
+  // about right). This trims the hubs and leaves the other roles alone.
+  private static readonly PASSER_ROLE_APPETITE: Record<PlayerRole, number> = {
+    CENTRE_BACK: 0,
+    FULL_BACK: 0,
+    DEFENSIVE_MID: -8,
+    CENTRAL_MID: -8,
+    ATTACKING_MID: -8,
+    WINGER: -12,
+    STRIKER: -4,
   };
 
   private readonly positionService = new DecisionPositionService();
@@ -246,6 +261,9 @@ export class PassingEvaluationService {
       PassingEvaluationService.TYPE_PREFERENCE[passType] +
       PassingEvaluationService.RECEIVER_ROLE_PREFERENCE[
         PositionInfluenceService.getRole(receiver.player.position)
+      ] +
+      PassingEvaluationService.PASSER_ROLE_APPETITE[
+        PositionInfluenceService.getRole(passer.player.position)
       ];
 
     // A soft floor (a multiplier would make negative scores BETTER).

@@ -2,6 +2,8 @@ import type { Player } from "../../modules/football-simulation/types/player.type
 import type { Team } from "../../modules/football-simulation/types/team.types.js";
 import { FORMATION_433, FORMATION_343, FORMATION_4231_CM, FORMATION_4231_DM  } from "../../modules/football-simulation/formations/index.js";
 import {PLAYERS} from "../players/players.js";
+import { type PlayerAttributes } from "../../modules/football-simulation/types/player.types.js";
+
 
 const BAYVIEW_PLAYERS: Player[] = [
     PLAYERS.Giddy_L,
@@ -19,6 +21,17 @@ const BAYVIEW_PLAYERS: Player[] = [
 
 const formation = FORMATION_433;
 
+const debuff = (attributes: PlayerAttributes): PlayerAttributes => {
+  const result = { ...attributes };
+
+  for (const stat of Object.keys(result) as (keyof PlayerAttributes)[]) {
+    result[stat] -= 10;
+    if(result[stat] < 1) result[stat] = 1 
+  }
+
+  return result;
+};
+
 const players: Player[] = BAYVIEW_PLAYERS.map((player, index) => {
   const slot = formation.slots[index];
 
@@ -32,6 +45,7 @@ const players: Player[] = BAYVIEW_PLAYERS.map((player, index) => {
     ...player,
     id: slot.id + (Math.random()*2),    
     position: slot.position,
+    //attributes: debuff(player.attributes)
   };
 });
 
@@ -48,7 +62,7 @@ export const BAYVIEW: Team = {
     color: "white",
     formation,   
     tactics: {
-        style: "COUNTER_ATTACKING",
+        style: "GEGENPRESS",
         mentality: "ATTACKING",
         formationFluidity: "FLUID",
         setPieceTakerId,

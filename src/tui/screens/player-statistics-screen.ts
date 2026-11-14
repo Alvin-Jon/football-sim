@@ -117,6 +117,7 @@ this.awayPanel.key(["down", "j"], () => {
       this.pad("PASS", 9),
       this.pad("TKL", 9),
       this.pad("INT", 5),
+      this.pad("DRI", 3),
       this.pad("SV", 5),
       this.pad("RAT", 4),
     ].join(" ");
@@ -126,7 +127,7 @@ this.awayPanel.key(["down", "j"], () => {
     const rows = teamPlayers.map((player) => {
       const stats = statistics[player.id] ?? this.emptyStats();
       const rating = ratings.get(player.id);
-
+      const duels = stats.duelBreakdown.SHIELD.kept + stats.duelBreakdown.TAKE_ON.kept;
       if (rating === undefined) {
         throw new Error(`Missing match rating for player: ${player.id}`);
       }
@@ -141,6 +142,7 @@ this.awayPanel.key(["down", "j"], () => {
           this.pad(`${stats.passesCompleted}/${stats.passesAttempted}`, 9),
           this.pad(`${stats.tacklesWon}/${stats.tacklesAttempted}`, 9),
           this.pad(String(stats.interceptions), 5),
+          this.pad(String(duels), 3),
           this.pad(String(stats.saves), 5),
           this.colorRating(rating),
         ].join(" ");

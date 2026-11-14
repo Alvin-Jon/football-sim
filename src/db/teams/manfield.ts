@@ -25,13 +25,13 @@ const MANFIELD_PLAYERS: Player[] = [
   PLAYERS.Rodrigo,
 ];
 
-const formation = FORMATION_433;
+const formation = FORMATION_4231_DM;
 
 const debuff = (attributes: PlayerAttributes, multiplier: number): PlayerAttributes => {
   const result = { ...attributes };
 
   for (const stat of Object.keys(result) as (keyof PlayerAttributes)[]) {
-    result[stat] = 20;
+    result[stat] -= 10;
   }
 
   return result;
@@ -50,12 +50,12 @@ const players: Player[] = MANFIELD_PLAYERS.map((player, index) => {
     ...player,
     id: slot.id + (Math.random()*2),
     position: slot.position,
-    //attributes: debuff(player.attributes, 0.9)
+   // attributes: debuff(player.attributes, 0.9)
   };
 });
 
 const setPieceTakerId = players.find(
-  (player) => player.position === "CM",
+  (player) => player.position === "AM",
 )?.id;
 if (!setPieceTakerId) {
   throw new Error("Manfield United has no attacking midfielder for set pieces");
@@ -67,7 +67,7 @@ export const MANFIELD: Team = {
   formation,
   color: "red",
   tactics: {
-    style: "GEGENPRESS",
+    style: "COUNTER_ATTACKING",
     mentality: "VERY_DEFENSIVE",
     formationFluidity: "FLUID",
     setPieceTakerId,
