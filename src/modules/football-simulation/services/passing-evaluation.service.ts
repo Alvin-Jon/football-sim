@@ -100,9 +100,9 @@ export class PassingEvaluationService {
     FULL_BACK: 0,
     DEFENSIVE_MID: -8,
     CENTRAL_MID: -8,
-    ATTACKING_MID: -8,
-    WINGER: -12,
-    STRIKER: -4,
+    ATTACKING_MID: -4,
+    WINGER: 0,
+    STRIKER: 0,
   };
 
   private readonly positionService = new DecisionPositionService();

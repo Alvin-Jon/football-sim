@@ -19,17 +19,17 @@ export class DribbleEvaluationService {
   // before carrying starts to look worse than releasing it. Without this a
   // free defensive midfielder ran the whole length of the pitch.
   private static readonly CARRY_ALLOWANCE: Record<PlayerRole, number> = {
-    CENTRE_BACK: 10,
-    FULL_BACK: 22,
-    DEFENSIVE_MID: 12,
-    CENTRAL_MID: 22,
-    ATTACKING_MID: 28,
-    WINGER: 35,
-    STRIKER: 28,
+    CENTRE_BACK: 8,
+    FULL_BACK: 15,
+    DEFENSIVE_MID: 10,
+    CENTRAL_MID: 15,
+    ATTACKING_MID: 14,
+    WINGER: 20,
+    STRIKER: 14,
   };
 
-  private static readonly CARRY_PENALTY_PER_METRE = 2.5;
-  private static readonly MAX_CARRY_PENALTY = 60;
+  private static readonly CARRY_PENALTY_PER_METRE = 3.5;
+  private static readonly MAX_CARRY_PENALTY = 80;
 
   evaluate(context: DecisionContext, candidate: DecisionCandidate): number {
     if (candidate.action !== "DRIBBLE") return 0;

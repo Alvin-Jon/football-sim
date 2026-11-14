@@ -20,7 +20,7 @@ export class PositionInfluenceService {
   > = {
     // Safe, simple distribution. Never shoot, dribble or run beyond the ball.
     CENTRE_BACK: {
-      TRACK_BACK:5,
+      TRACK_BACK: 5,
       PASS: 8,
       LONG_BALL: 8,
       THROUGH_BALL: -10,
@@ -53,44 +53,49 @@ export class PositionInfluenceService {
     },
 
     // Balanced; the team's main passers and playmakers.
+    // SHOOT -4: central mids were shooting about 3.7 times a match.
     CENTRAL_MID: {
       PASS: 4,
       THROUGH_BALL: 6,
       CROSS: -4,
+      SHOOT: -4,
     },
 
     // Creators: through balls, some shooting and carrying.
+    // SHOOT was +2 (about 11 shots a match for one attacking mid).
     ATTACKING_MID: {
       PASS: -10,
       THROUGH_BALL: 10,
       LONG_BALL: -6,
       DRIBBLE: 6,
-      SHOOT: 2,
+      SHOOT: -4,
       MAKE_RUN: 9,
       SUPPORT: 3,
     },
 
     // Take players on and deliver crosses; seldom recycle the ball.
+    // SHOOT was +2 (about 6 shots a match each).
     WINGER: {
       PASS: -13,
       THROUGH_BALL: -4,
       LONG_BALL: -10,
       CROSS: 12,
       DRIBBLE: 15,
-      SHOOT: 2,
+      SHOOT: -4,
       MAKE_RUN: 12,
       SUPPORT: -4,
     },
 
     // Finish moves rather than build them: shoot, run in behind, and stay
     // forward instead of dropping to the ball.
+    // SHOOT was +6.
     STRIKER: {
       PASS: -24,
       THROUGH_BALL: -10,
       LONG_BALL: -16,
       CROSS: -30,
       DRIBBLE: 6,
-      SHOOT: 6,
+      SHOOT: 2,
       HOLD_BALL: -6,
       MAKE_RUN: 12,
       SUPPORT: -10,

@@ -18,7 +18,7 @@ export function hash01(key: string): number {
 // How far ahead the waiting carry aims each tick. Movement speeds up while
 // the target is far and eases off as it gets close, so a shorter step means a
 // slower, shorter carry while the player waits to release the ball.
-export const CARRY_STEP = 3;
+export const CARRY_STEP = 1.5;
 
 const ANGLES_DEGREES = [-50, -25, 0, 25, 50];
 const LOOKAHEAD = 8;
