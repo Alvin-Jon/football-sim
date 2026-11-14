@@ -59,6 +59,8 @@ export class ActionEngineService {
       case "MARK":
       case "TRACK_BACK":
       case "INTERCEPT":
+      case "BLOCK_SHOT":
+      case "COVER_GOAL":
         return this.startMovement(execution, state, tick);
 
       default:
@@ -101,6 +103,7 @@ export class ActionEngineService {
         state.currentAction = "MARKING";
         break;
 
+      case "BLOCK_SHOT":
       case "MAKE_RUN":
         state.currentAction = "RUNNING";
         break;

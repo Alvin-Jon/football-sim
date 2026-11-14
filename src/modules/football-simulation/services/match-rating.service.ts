@@ -134,13 +134,14 @@ export class MatchRatingService {
         stats.shotsOnTarget * 0.1 -
         attemptsOffTarget * 0.05,
       chanceCreation:
-        stats.assists * 0.5 + stats.chancesCreated * 0.35,
+        stats.assists * 0.5 + (stats.chancesCreated-stats.assists) * 0.35,
       passing: this.getPassingImpact(stats),
       defending:
         stats.tacklesWon * 0.25 +
         stats.tacklesLoose * 0.1 -
         stats.tacklesBeaten * 0.18 +
-        stats.interceptions * 0.22,
+        stats.interceptions * 0.22 +
+        stats.blocks * 0.35,
       duels:
         this.getDuelImpact(stats.duelBreakdown.TAKE_ON) +
         this.getDuelImpact(stats.duelBreakdown.SHIELD),

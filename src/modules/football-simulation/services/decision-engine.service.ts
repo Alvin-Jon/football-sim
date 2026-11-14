@@ -19,6 +19,7 @@ import type { FormationSlot } from "../types/formation.types.js";
 import type { FormationFluidity } from "../types/formation.types.js";
 import { TacticsService } from "./tactics.service.js";
 import { PITCH_DIMENSIONS } from "../constants/pitch.constants.js";
+import { GoalCoverService } from "./goal-cover.service.js";
 
 
 export class DecisionEngineService {
@@ -196,6 +197,15 @@ export class DecisionEngineService {
   private generateOffBallActions(
     context: DecisionContext,
   ): DecisionCandidate[] {
+    if (context.blockOpportunity) {
+        return [{
+          action: "BLOCK_SHOT",
+          score: 0,
+          targetPosition: context.blockOpportunity.point,
+          reasoning: ["Get in the way of the shot"],
+        }];
+      }
+    
     let candidates: DecisionCandidate[] = [];
 
     const formation = context.formation;
@@ -263,6 +273,16 @@ export class DecisionEngineService {
         // and only if they are inside this player's zone.
         let markTarget: DecisionContext["opponents"][number] | undefined;
         let markDistance = Infinity;
+        const cover = GoalCoverService.getAssignment(context);
+
+        if (cover) {
+          return [{
+            action: "COVER_GOAL",
+            score: 0,
+            targetPosition: cover.point,
+            reasoning: [`Cover the goal (${cover.role})`],
+          }];
+        };
 
         for (const opponent of context.opponents) {
           if (opponent.player.id === ballCarrier?.player.id) continue;

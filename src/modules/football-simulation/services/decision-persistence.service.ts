@@ -26,6 +26,9 @@ export class DecisionPersistenceService {
     TRACK_BACK: 8,
     INTERCEPT: 4,
 
+    BLOCK_SHOT: 1,
+    COVER_GOAL: 4,
+
     TACKLE: 1,
     HARD_TACKLE: 1,
   };
@@ -64,6 +67,11 @@ export class DecisionPersistenceService {
     if (context.tick >= expiresAtTick) {
       return true;
     }
+
+    // reaccess block 
+    if (!!context.blockOpportunity !== (decision.action === "BLOCK_SHOT")) {
+        return true;
+      }
 
     // A defender who has closed to tackle range should re-evaluate immediately.
     if (context.phase === "DEFENDING" && decision.action !== "TACKLE" && decision.action !== "HARD_TACKLE") {
@@ -177,6 +185,7 @@ export class DecisionPersistenceService {
       "MARK",
       "TRACK_BACK",
       "INTERCEPT",
+      "COVER_GOAL"
     ].includes(action);
   }
 

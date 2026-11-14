@@ -118,6 +118,7 @@ this.awayPanel.key(["down", "j"], () => {
       this.pad("TKL", 9),
       this.pad("INT", 5),
       this.pad("DRI", 3),
+      this.pad("BL", 3),
       this.pad("SV", 5),
       this.pad("RAT", 4),
     ].join(" ");
@@ -143,6 +144,7 @@ this.awayPanel.key(["down", "j"], () => {
           this.pad(`${stats.tacklesWon}/${stats.tacklesAttempted}`, 9),
           this.pad(String(stats.interceptions), 5),
           this.pad(String(duels), 3),
+          this.pad(String(stats.blocks), 2),
           this.pad(String(stats.saves), 5),
           this.colorRating(rating),
         ].join(" ");

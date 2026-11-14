@@ -56,6 +56,8 @@ import { TacticsService } from "./tactics.service.js";
 import { TackleDuelService } from "./tackle-duel.service.js";
 import type { DuelOutcome } from "./tackle-duel.service.js";
 import { chooseCarryTarget } from "../utils/carry-direction.util.js";
+import { ShotBlockService } from "./shot-block.service.js";
+import type { BlockOpportunity } from "../types/decision.types.js";
 
 
 interface PendingPass {
@@ -143,6 +145,8 @@ export class MatchActionService {
   private readonly receiving: ReceivingService;
   private readonly shooting: ShootingService;
   private readonly interception: InterceptionService;
+  private readonly shotBlock: ShotBlockService;
+  private blockOpportunities = new Map<string, BlockOpportunity>();
   private readonly goalkeeperPositioning = new GoalkeeperPositioningService();
   private readonly goalkeeperPrediction = new GoalkeeperPredictionService(
     this.trajectory,
@@ -182,6 +186,7 @@ export class MatchActionService {
     this.receiving = new ReceivingService(this.ballInteraction, random);
     this.shooting = new ShootingService(this.ballInteraction, random);
     this.goalkeeperSave = new GoalkeeperSaveService(random);
+    this.shotBlock = new ShotBlockService(this.trajectory, random);
     this.tackleDuel = new TackleDuelService(random);
     this.interception = new InterceptionService(
       this.ballInteraction,
@@ -206,7 +211,7 @@ export class MatchActionService {
     const previousBallHeight = match.ball.height;
 
     this.ballPhysics.update(match.ball, deltaTime);
-
+    this.resolveShotBlocks(match, previousBallPosition, previousBallHeight);
     // Goalkeepers run in a random order so neither side always goes first.
     const keepers: Array<() => void> = [
       () =>
@@ -234,7 +239,7 @@ export class MatchActionService {
     for (const run of keepers) run();
 
     this.receiveFreeBall(match);
-
+    this.assessShotBlocks(match);
     const planned: PlannedAction[] = [
       ...this.planOutfieldActions(
         match,
@@ -317,6 +322,56 @@ export class MatchActionService {
     const holder = this.findPlayer(match, playerId);
     if (holder) this.possessionOrigins.set(playerId, { ...holder.state.position });
   }
+
+  private getShotDefenders(match: MatchState, shot: PendingShot) {
+  const home = shot.teamId === match.homeTeam.id;
+  const team = home ? match.awayTeam : match.homeTeam;
+  const state = home ? match.awayTeamState : match.homeTeamState;
+  const direction = home ? match.awayDirection : match.homeDirection;
+
+  return {
+    team,
+    ownGoalX: direction === "LEFT_TO_RIGHT" ? 0 : PITCH_DIMENSIONS.length,
+    defenders: this.getDecisionPlayers(team, state).filter(
+      ({ player }) => player.position !== "GK",
+    ),
+  };
+}
+
+private assessShotBlocks(match: MatchState): void {
+  this.blockOpportunities = new Map();
+
+  const shot = this.pendingShots.get(match.id);
+  if (!shot || match.ball.possessionPlayerId !== null) return;
+  if (match.tick - shot.tick > MatchActionService.SHOT_WINDOW_TICKS) return;
+
+  const { ownGoalX, defenders } = this.getShotDefenders(match, shot);
+  this.blockOpportunities = this.shotBlock.assess(match.ball, shot, defenders, ownGoalX);
+}
+
+private resolveShotBlocks(match: MatchState, previousPosition: Vector2D, previousHeight: number): void {
+  const shot = this.pendingShots.get(match.id);
+  if (!shot || match.ball.possessionPlayerId !== null) return;
+  if (match.tick - shot.tick > MatchActionService.SHOT_WINDOW_TICKS) return;
+
+  const { team, defenders } = this.getShotDefenders(match, shot);
+
+  const blocker = this.shotBlock.resolve(
+    match.id, match.ball, previousPosition, previousHeight, shot, defenders,
+    new Set(this.blockOpportunities.keys()),
+  );
+  if (!blocker) return;
+
+  
+  const d = this.shotBlock.computeDeflection(match.ball);
+  this.ballInteraction.deflectBall(match.ball, d.direction, d.speed, d.verticalSpeed);
+  MatchStatisticsService.recordBlock(match, blocker.player.id);
+  match.ball.lastTouchTeamId = team.id;
+  
+  this.lockOut(match, blocker.player.id);
+  this.pendingShots.delete(match.id);
+  this.blockOpportunities = new Map();
+}
 
   // True if the carrier has not held the ball long enough to release it yet.
   private mustKeepBall(
@@ -901,6 +956,7 @@ export class MatchActionService {
       ? PITCH_DIMENSIONS.length
       : 0;
     const decisionPlayers = this.getDecisionPlayers(team, teamState);
+    const blockOpportunity = this.blockOpportunities.get(player.id);
 
     const phase = match.ball.possessionTeamId === null
       ? "TRANSITION"
@@ -967,6 +1023,7 @@ export class MatchActionService {
             : 0,
         },
       }),
+      ...(blockOpportunity && { blockOpportunity }),
     };
   }
 
@@ -1038,6 +1095,12 @@ export class MatchActionService {
 
     switch (decision.action) {
       case "PRESS":
+        this.actionEngine.execute(state, decision, match.tick);
+        return;
+      
+      case "BLOCK_SHOT":
+      case "COVER_GOAL":
+        // No formation clamp: so they can leave their zone.
         this.actionEngine.execute(state, decision, match.tick);
         return;
 

@@ -289,6 +289,15 @@ export class MatchStatisticsService {
     }
   }
 
+  // A defender got in the way of a shot and stopped it reaching the goalkeeper.
+    static recordBlock(match: MatchState, playerId: string): void {
+      const player = match.statistics.players[playerId];
+
+      if (player) {
+        player.blocks++;
+      }
+    }
+
   static recordAssist(
     match: MatchState,
     assisterId: string,

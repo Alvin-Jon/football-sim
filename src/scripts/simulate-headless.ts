@@ -58,6 +58,7 @@ interface Totals {
   longCarries: number;
   veryLongCarries: number;
   longestCarry: number;
+  blocks: number;
 }
 
 const emptyKinds = () => ({
@@ -90,6 +91,7 @@ const empty = (): Totals => ({
   longCarries: 0,
   veryLongCarries: 0,
   longestCarry: 0,
+  blocks:0,
 });
 
 const pct = (part: number, whole: number): string =>
@@ -344,6 +346,7 @@ function add(totals: Totals, stats: Match["statistics"]["players"][string]): voi
   totals.longCarries += stats.longCarries;
   totals.veryLongCarries += stats.veryLongCarries;
   totals.longestCarry = Math.max(totals.longestCarry, stats.longestCarry);
+  totals.blocks += stats.blocks;
 
   for (const kind of PASS_KINDS) {
     const typed = MatchStatisticsService.getPassTypeStats(stats, kind);
@@ -393,6 +396,11 @@ for (let index = 0; index < MATCHES; index++) {
   const { home, away } = match.statistics;
   const homeDuels = sumDuels(home.duelBreakdown);
   const awayDuels = sumDuels(away.duelBreakdown);
+  const blocksBy = (team: Match["homeTeam"]): number =>
+    team.players.reduce(
+      (sum, player) => sum + (match.statistics.players[player.id]?.blocks ?? 0),
+      0,
+    );
 
   matchRows.push({
     match: index + 1,
@@ -402,11 +410,9 @@ for (let index = 0; index < MATCHES; index++) {
     onTarget: `${home.shotsOnTarget}-${away.shotsOnTarget}`,
     passes: `${home.passesAttempted}-${away.passesAttempted}`,
     accuracy: `${pct(home.passesCompleted, home.passesAttempted)}-${pct(away.passesCompleted, away.passesAttempted)}`,
-    // Interceptions are credited to the DEFENDING team.
     interceptions: `${home.interceptions}-${away.interceptions}`,
-    // Tackles made by each team.
     tackles: `${home.tacklesAttempted}-${away.tacklesAttempted}`,
-    // Duels each team's carriers faced, and how many they kept.
+    blocks: `${blocksBy(match.homeTeam)}-${blocksBy(match.awayTeam)}`,
     dribblesKept: `${homeDuels.kept}/${homeDuels.faced}-${awayDuels.kept}/${awayDuels.faced}`,
     saves: `${home.saves}-${away.saves}`,
     seconds,
@@ -429,6 +435,7 @@ console.table(
     "goals/player": (t.goals / t.players).toFixed(2),
     "tackles/player": (t.tacklesAttempted / t.players).toFixed(1),
     "int/player": (t.interceptions / t.players).toFixed(1),
+    "blocks/player": (t.blocks / t.players).toFixed(2),
   })),
 );
 
@@ -677,6 +684,25 @@ console.table(
     }),
   );
 }
+
+console.log(
+  "\nSHOT BLOCKS BY DEFENDER ROLE: per player per match\n" +
+    "(blocked % = blocks as a share of all shots taken; real football is\n" +
+    "roughly 25-30%, so 15-30% is a reasonable target here)",
+);
+console.table(
+  [
+    ...[...byRole.entries()].map(([role, t]) => [role, t] as const),
+    ["ALL", overall] as const,
+  ].map(([role, t]) => ({
+    role,
+    "blocks/player": (t.blocks / Math.max(1, t.players)).toFixed(2),
+    blocks: t.blocks,
+    "blocked % of shots": role === "ALL" ? pct(t.blocks, overall.shots) : "-",
+  })),
+);
+
+
 
 console.log(
   "\nCARRIES BY ROLE: how far a player takes the ball between getting it and giving it up\n" +

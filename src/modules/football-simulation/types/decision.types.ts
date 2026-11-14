@@ -19,7 +19,9 @@ export type DecisionAction =
   | "TRACK_BACK"
   | "INTERCEPT"
   | "TACKLE"
-  | "HARD_TACKLE";
+  | "HARD_TACKLE"
+  | "BLOCK_SHOT"
+  | "COVER_GOAL";
 
 export interface DecisionCandidate {
   action: DecisionAction;
@@ -27,6 +29,14 @@ export interface DecisionCandidate {
   targetPosition?: Vector2D;
   targetPlayerId?: string;
   reasoning: string[];
+}
+
+export interface BlockOpportunity {
+  point: Vector2D;  
+  time: number;      
+  margin: number;    
+  chance: number;    
+  shooterId: string;
 }
 
 export interface DecisionResult {
@@ -62,6 +72,8 @@ export interface DecisionContext {
 
   goalPosition: Vector2D;
   tactics: TacticalModifiers;
+
+  blockOpportunity?: BlockOpportunity;
 
   carry?: { distance: number }; // metres carried since he got the ball
 

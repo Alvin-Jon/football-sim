@@ -277,6 +277,7 @@ export interface PlayerMatchStatistics {
   tacklesLoose: number;
   tacklesBeaten: number;
   duelBreakdown: DuelBreakdown;
+  blocks: number;
 
   interceptions: number;
   saves: number;
@@ -349,6 +350,7 @@ export function createPlayerStatistics(): PlayerMatchStatistics {
     tacklesLoose: 0,
     tacklesBeaten: 0,
     duelBreakdown: createDuelBreakdown(),
+    blocks: 0,
 
     interceptions: 0,
     saves: 0,
